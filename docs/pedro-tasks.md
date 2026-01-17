@@ -95,9 +95,10 @@ backend/
 
 **Environment Variable:**
 ```env
-MONGODB_URI=mongodb+srv...
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>
 ```
 
+**⚠️ SECURITY NOTE:** Never commit real credentials to the repository. Use environment variables or a `.env` file (which should be in `.gitignore`).
 **Integration Point:**
 - Yaw will use this connection for schema setup
 - All API endpoints will use this database
