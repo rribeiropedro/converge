@@ -95,7 +95,7 @@ backend/
 
 **Environment Variable:**
 ```env
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/nexhacks
+MONGODB_URI=mongodb+srv...
 ```
 
 **Integration Point:**
