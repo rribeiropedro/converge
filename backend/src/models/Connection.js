@@ -27,6 +27,17 @@ const ConnectionSchema = new mongoose.Schema({
     confidence: { type: String, enum: ['high', 'medium', 'low'], required: false },
     source: { type: String, enum: ['livekit', 'manual'], required: false },
   },
+  // Education fields at same level as company/role
+  institution: {
+    value: { type: String, required: false },
+    confidence: { type: String, enum: ['high', 'medium', 'low'], required: false },
+    source: { type: String, enum: ['livekit', 'manual'], required: false },
+  },
+  major: {
+    value: { type: String, required: false },
+    confidence: { type: String, enum: ['high', 'medium', 'low'], required: false },
+    source: { type: String, enum: ['livekit', 'manual'], required: false },
+  },
   visual: {
     face_embedding: { type: [Number], default: [] },
     face_embedding_history: [{
@@ -85,12 +96,6 @@ const ConnectionSchema = new mongoose.Schema({
       start_date: { type: Date, required: false },
       end_date: { type: Date, required: false },
       description: { type: String, required: false }
-    }],
-    education: [{
-      degree: { type: String, required: false },
-      institution: { type: String, required: false },
-      start_date: { type: Date, required: false },
-      end_date: { type: Date, required: false }
     }],
     skills: { type: [String], default: [] }
   },

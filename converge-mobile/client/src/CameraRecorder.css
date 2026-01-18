@@ -515,8 +515,8 @@ body {
   gap: 10px;
   align-items: center; /* Center profile image vertically with bullet points */
   max-height: calc(22vh - 60px); /* Match overlay max-height minus header and padding */
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 /* Profile image container - circular on right side, fixed size */
