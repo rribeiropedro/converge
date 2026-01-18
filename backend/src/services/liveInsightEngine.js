@@ -191,11 +191,57 @@ class LiveInsightEngine {
     }
     
     try {
-      return JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      return this.normalizeExtraction(parsed);
     } catch (e) {
       console.warn('[LiveInsightEngine] Failed to parse LLM JSON:', e.message);
       return {};
     }
+  }
+
+  /**
+   * Normalize LLM output to expected schema
+   * LLMs sometimes return arrays instead of strings, objects instead of primitives, etc.
+   */
+  normalizeExtraction(raw) {
+    const profileFields = ['name', 'company', 'role', 'institution', 'major'];
+    const arrayFields = ['topics', 'challenges', 'hooks', 'personal'];
+    const normalized = {};
+
+    // Profile fields should be strings
+    for (const key of profileFields) {
+      const val = raw[key];
+      if (val == null) continue;
+      if (typeof val === 'string') {
+        normalized[key] = val;
+      } else if (Array.isArray(val) && val.length > 0) {
+        // LLM returned array instead of string - take first element
+        normalized[key] = typeof val[0] === 'string' ? val[0] : String(val[0]);
+      } else if (typeof val === 'object' && val.value) {
+        // LLM returned {value: "..."} object
+        normalized[key] = String(val.value);
+      } else {
+        normalized[key] = String(val);
+      }
+    }
+
+    // Array fields should be arrays of strings
+    for (const key of arrayFields) {
+      const val = raw[key];
+      if (val == null) continue;
+      if (Array.isArray(val)) {
+        normalized[key] = val.map(item => 
+          typeof item === 'string' ? item : 
+          (item && typeof item === 'object' && item.value) ? String(item.value) :
+          String(item)
+        ).filter(s => s && s.trim().length > 0);
+      } else if (typeof val === 'string') {
+        // LLM returned string instead of array - wrap it
+        normalized[key] = [val];
+      }
+    }
+
+    return normalized;
   }
 
   /**
