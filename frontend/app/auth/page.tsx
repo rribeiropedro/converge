@@ -13,7 +13,7 @@ import { setAuthData } from "@/lib/auth"
 type AuthMode = "login" | "signup"
 
 // API configuration
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 export default function AuthPage() {
   const router = useRouter()
@@ -81,7 +81,12 @@ export default function AuthPage() {
       router.push("/dashboard")
     } catch (error) {
       console.error("Auth error:", error)
-      setErrors({ general: "Network error. Please check your connection." })
+      // Check if it's a network/fetch error
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        setErrors({ general: "Cannot connect to server. Please make sure the backend server is running on port 5000." })
+      } else {
+        setErrors({ general: "Network error. Please check your connection." })
+      }
       setIsLoading(false)
     }
   }

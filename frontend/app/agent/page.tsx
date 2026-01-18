@@ -6,6 +6,8 @@ import { Room, RoomEvent, Track, RemoteTrack, RemoteTrackPublication, RemotePart
 import { cn } from "@/lib/utils"
 import { connections } from "@/lib/data"
 import { ConnectionProfileCard, type MongoDBConnection } from "@/components/connection-profile-card"
+import { UISchemaInterpreter } from "@/components/ui-schema-interpreter"
+import { extractUISchemas, type UISchema } from "@/lib/ui-schema"
 
 type AgentState = "idle" | "listening" | "responding" | "done"
 
@@ -17,6 +19,7 @@ interface Message {
   profileData?: MongoDBConnection
   isInterim?: boolean // For live transcription
   segmentId?: string // For tracking transcription segments
+  uiSchemas?: UISchema[] // Parsed UI schemas from agent response
 }
 
 const promptChips = [
@@ -202,12 +205,16 @@ export default function AgentPage() {
                   !(m.type === 'agent' && m.segmentId === segmentId && m.isInterim)
                 )
                 
+                // Parse UI schemas from agent message
+                const { schemas, textWithoutSchemas } = extractUISchemas(message)
+                
                 return [...filtered, {
                   id: segmentId || Date.now().toString(),
                   type: "agent",
-                  content: message,
+                  content: textWithoutSchemas || message, // Use original if no schemas found
                   isInterim: !isFinal,
                   segmentId,
+                  uiSchemas: schemas.length > 0 ? schemas : undefined,
                 }]
               })
             } else {
@@ -568,8 +575,18 @@ export default function AgentPage() {
                       {message.isInterim && "..."}
                     </div>
                   ) : message.type === "agent" ? (
-                    <div className="rounded bg-card border border-border px-3 py-2 text-sm">
-                      {message.content}
+                    <div className="space-y-3">
+                      {/* Agent text content - only show if there's actual content */}
+                      {message.content && message.content.trim() && (
+                        <div className="rounded bg-card border border-border px-3 py-2 text-sm">
+                          {message.content.trim()}
+                        </div>
+                      )}
+                      
+                      {/* UI Schemas rendered as components */}
+                      {message.uiSchemas && message.uiSchemas.map((schema, idx) => (
+                        <UISchemaInterpreter key={`${message.id}-schema-${idx}`} schema={schema} />
+                      ))}
                     </div>
                   ) : message.type === "profile" && message.profileData ? (
                     // Profile cards container - can fit up to 4 side by side

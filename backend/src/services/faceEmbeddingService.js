@@ -1,4 +1,3 @@
-import * as faceapi from '@vladmandic/face-api';
 import canvas from 'canvas';
 import fetch from 'node-fetch';
 import path from 'path';
@@ -11,23 +10,43 @@ const __dirname = path.dirname(__filename);
 
 const MODEL_URL = path.join(__dirname, '../../face-api-models');
 
-faceapi.env.monkeyPatch({
-  Canvas,
-  Image,
-  ImageData,
-  fetch
-});
-
+let faceapi = null;
 let modelsLoaded = false;
+
+/**
+ * Lazy-load face-api to avoid TensorFlow initialization errors at startup
+ */
+async function loadFaceAPI() {
+  if (faceapi) return faceapi;
+  
+  try {
+    // Dynamic import to avoid loading TensorFlow until actually needed
+    faceapi = await import('@vladmandic/face-api');
+    
+    faceapi.env.monkeyPatch({
+      Canvas,
+      Image,
+      ImageData,
+      fetch
+    });
+    
+    return faceapi;
+  } catch (error) {
+    console.error('Failed to load @vladmandic/face-api:', error);
+    throw new Error('Face-API library failed to load. TensorFlow may not be properly installed. Error: ' + error.message);
+  }
+}
 
 export async function loadModels() {
   if (modelsLoaded) return;
   
+  const api = await loadFaceAPI();
+  
   console.log('Loading face-api.js models from:', MODEL_URL);
   try {
-    await faceapi.nets.tinyFaceDetector.loadFromDisk(MODEL_URL);
-    await faceapi.nets.faceLandmark68Net.loadFromDisk(MODEL_URL);
-    await faceapi.nets.faceRecognitionNet.loadFromDisk(MODEL_URL);
+    await api.nets.tinyFaceDetector.loadFromDisk(MODEL_URL);
+    await api.nets.faceLandmark68Net.loadFromDisk(MODEL_URL);
+    await api.nets.faceRecognitionNet.loadFromDisk(MODEL_URL);
     console.log('face-api.js models loaded successfully.');
     modelsLoaded = true;
   } catch (error) {
@@ -38,6 +57,8 @@ export async function loadModels() {
 
 export async function generateFaceEmbedding(imageData) {
   await loadModels();
+  
+  const api = await loadFaceAPI();
 
   let img;
   if (imageData.startsWith('data:image')) {
@@ -54,7 +75,7 @@ export async function generateFaceEmbedding(imageData) {
     throw new Error('Unsupported image data format. Must be base64 data URI or URL.');
   }
 
-  const detections = await faceapi.detectSingleFace(img, new faceapi.TinyFaceDetectorOptions())
+  const detections = await api.detectSingleFace(img, new api.TinyFaceDetectorOptions())
                                    .withFaceLandmarks()
                                    .withFaceDescriptor();
 
