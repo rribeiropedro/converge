@@ -1,11 +1,12 @@
 import express from 'express';
 import userRoutes from './userRoutes.js';
 import connectionRoutes from './connectionRoutes.js';
-
+import overshootRoutes from './overshootRoutes.js';
 const router = express.Router();
 
 router.use('/users', userRoutes);
 router.use('/connections', connectionRoutes);
+router.use('/', overshootRoutes);
 
 router.get('/', (req, res) => {
   res.json({
@@ -14,6 +15,8 @@ router.get('/', (req, res) => {
     endpoints: {
       users: '/api/users',
       connections: '/api/connections',
+      overshoot: '/api/overshoot-result',
+      headshot: '/api/generate-headshot',
       health: '/health'
     }
   });
