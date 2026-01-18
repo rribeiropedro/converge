@@ -54,9 +54,29 @@ export async function parseVisualData(visualInput) {
     throw new Error('Visual input is empty or invalid');
   }
 
+  // Handle Overshoot SDK result format
+  // Overshoot returns: { face_detected, appearance_profile, environment_context }
+  // We need to convert to: { appearance: { description }, environment: { description } }
   let parsedVisual = visualInput;
   
-  if (!visualInput.appearance?.description || !visualInput.environment?.description) {
+  // Check if this is an Overshoot result (has appearance_profile or environment_context)
+  if (visualInput.appearance_profile || visualInput.environment_context) {
+    // Convert Overshoot format to our format
+    parsedVisual = {
+      ...visualInput,
+      appearance: {
+        description: visualInput.appearance_profile || '',
+        distinctive_features: []
+      },
+      environment: {
+        description: visualInput.environment_context || '',
+        landmarks: []
+      }
+    };
+  }
+  
+  // If we still don't have appearance/environment descriptions, use OpenRouter to extract
+  if (!parsedVisual.appearance?.description || !parsedVisual.environment?.description) {
     const inputDescription = typeof visualInput === 'string' 
       ? visualInput 
       : JSON.stringify(visualInput);
@@ -66,7 +86,20 @@ export async function parseVisualData(visualInput) {
     if (!jsonMatch) {
       throw new Error('Failed to extract JSON from LLM response');
     }
-    parsedVisual = JSON.parse(jsonMatch[0]);
+    const openRouterParsed = JSON.parse(jsonMatch[0]);
+    
+    // Merge OpenRouter results with existing data
+    parsedVisual = {
+      ...parsedVisual,
+      appearance: {
+        description: openRouterParsed.appearance?.description || parsedVisual.appearance?.description || '',
+        distinctive_features: openRouterParsed.appearance?.distinctive_features || parsedVisual.appearance?.distinctive_features || []
+      },
+      environment: {
+        description: openRouterParsed.environment?.description || parsedVisual.environment?.description || '',
+        landmarks: openRouterParsed.environment?.landmarks || parsedVisual.environment?.landmarks || []
+      }
+    };
   }
 
   // Merge input with parsed visual data
@@ -86,6 +119,7 @@ export async function parseVisualData(visualInput) {
     try {
       const imageData = normalizedVisual.headshot.base64 || normalizedVisual.headshot.url;
       normalizedVisual.face_embedding = await generateFaceEmbedding(imageData);
+      
       console.log('Generated 128-dim face embedding for headshot.');
     } catch (error) {
       console.warn('Failed to generate face embedding from headshot:', error.message);
