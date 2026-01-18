@@ -39,6 +39,8 @@ export const registerSessionSocket = (io) => {
     // Per-socket state
     let deepgramConnection = null;
     let currentSessionId = null;
+    let deepgramReady = false;
+    let audioQueue = []; // Queue chunks until connection is ready
 
     const closeDeepgramConnection = () => {
       if (!deepgramConnection) return;
@@ -53,6 +55,8 @@ export const registerSessionSocket = (io) => {
         // Ignore cleanup errors
       }
       deepgramConnection = null;
+      deepgramReady = false;
+      audioQueue = [];
     };
 
     const startDeepgramConnection = (options = {}) => {
@@ -67,7 +71,7 @@ export const registerSessionSocket = (io) => {
           diarize: true,
           smart_format: true,
           interim_results: true,  // Get results while speaking, not just at end
-          // Let Deepgram auto-detect encoding from webm/opus container
+          encoding: 'opus',  // Required for WebM/Opus streams - Deepgram can't auto-detect in live mode
           ...options
         });
       } catch (error) {
@@ -78,6 +82,15 @@ export const registerSessionSocket = (io) => {
 
       deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
         console.log(`[SessionSocket] Deepgram connection opened for session ${currentSessionId}`);
+        deepgramReady = true;
+        
+        // Flush queued audio chunks now that connection is ready
+        if (audioQueue.length > 0) {
+          console.log(`[SessionSocket] Flushing ${audioQueue.length} queued audio chunks`);
+          audioQueue.forEach(buffer => deepgramConnection.send(buffer));
+          audioQueue = [];
+        }
+        
         socket.emit('session:audio_ready');
       });
 
@@ -225,13 +238,19 @@ export const registerSessionSocket = (io) => {
 
         // Forward audio chunk to Deepgram
         const buffer = toBuffer(chunk);
-        if (buffer && deepgramConnection) {
+        if (buffer) {
           audioChunkCount++;
           // Log first chunk and then every 20th chunk to avoid spam
           if (audioChunkCount === 1 || audioChunkCount % 20 === 0) {
             console.log(`[SessionSocket] 🎵 Audio chunk #${audioChunkCount} received (${buffer.length} bytes)`);
           }
-          deepgramConnection.send(buffer);
+          
+          // Queue chunks until connection is ready, then send directly
+          if (deepgramReady && deepgramConnection) {
+            deepgramConnection.send(buffer);
+          } else {
+            audioQueue.push(buffer);
+          }
         }
       } catch (error) {
         console.error('[SessionSocket] Error processing audio chunk:', error);
