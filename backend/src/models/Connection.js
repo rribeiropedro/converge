@@ -46,6 +46,15 @@ const ConnectionSchema = new mongoose.Schema({
       event: { type: String, required: false },
       quality_score: { type: Number, required: false }
     }],
+    // Text embedding of name + appearance (1536-dim vector from OpenAI)
+    appearance_embedding: { type: [Number], default: [] },
+    // History of appearance embeddings for tracking changes over time
+    appearance_embedding_history: [{
+      vector: { type: [Number], required: true },
+      captured_at: { type: Date, default: Date.now },
+      event: { type: String, required: false },
+      description_used: { type: String, required: false }  // Store the text that was embedded
+    }],
     appearance: {
       description: { type: String, default: '' },
       distinctive_features: { type: [String], default: [] },
