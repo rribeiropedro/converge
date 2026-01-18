@@ -3,7 +3,7 @@ import Interaction from '../models/Interaction.js';
 import { parseTranscript } from './transcriptParser.js';
 import { parseVisualData } from './visualParser.js';
 import { calculateNeedsReview, getFieldsNeedingReview } from './confidenceService.js';
-import { findMatchingConnection, determineMatchAction, addFaceEmbeddingToHistory } from './faceMatching.js';
+import { findMatchingConnection, determineMatchAction, addAppearanceEmbedding } from './faceMatching.js';
 
 export async function processNewInteraction(audioInput, visualInput, context, userId) {
   let audioData;
@@ -15,17 +15,21 @@ export async function processNewInteraction(audioInput, visualInput, context, us
 
   let visualData = await parseVisualData(visualInput);
 
-  if (!visualData.face_embedding || visualData.face_embedding.length === 0) {
-    console.warn('No face embedding generated. Creating new connection.');
+  // Get name from audio data and appearance from visual data for matching
+  const name = audioData?.profile?.name?.value || '';
+  const appearanceDescription = visualData?.appearance?.description || '';
+
+  if (!name && !appearanceDescription) {
+    console.warn('No name or appearance data available. Creating new connection.');
     const draft = await createDraftConnection(audioData, visualData, context, userId);
     return { type: 'new', draft };
   }
 
-  // Check for matching face first
-  const matches = await findMatchingConnection(userId, visualData.face_embedding);
-  
-  // Simplified MVP: >= 0.80 = update existing, < 0.80 = create new
-  if (matches.length > 0 && matches[0].score >= 0.80) {
+  // Check for matching connection using text embedding (name + appearance)
+  const matches = await findMatchingConnection(userId, name, appearanceDescription);
+
+  // Simplified MVP: >= 0.75 = update existing, < 0.75 = create new
+  if (matches.length > 0 && matches[0].score >= 0.75) {
     // Match found - update existing connection
     const existingConnection = await addInteractionToExistingConnection(
       matches[0].connection._id,
@@ -43,7 +47,7 @@ export async function processNewInteraction(audioInput, visualInput, context, us
     };
   }
 
-  // No match or score < 0.80 - create new connection
+  // No match or score < 0.75 - create new connection
   const draft = await createDraftConnection(audioData, visualData, context, userId);
   return { type: 'new', draft };
 }
@@ -82,9 +86,11 @@ export async function createDraftConnection(audioData, visualData, context, user
       source: 'livekit',
     } : undefined,
     visual: {
-      face_embedding: visualData.face_embedding || [],
-      face_embedding_history: visualData.face_embedding?.length === 128 
-        ? [{ vector: visualData.face_embedding, captured_at: new Date(), event: context.event?.name }] 
+      face_embedding: visualData.face_embedding || [],  // Deprecated, kept for migration
+      face_embedding_history: [],  // Deprecated
+      appearance_embedding: visualData.appearance_embedding || [],
+      appearance_embedding_history: visualData.appearance_embedding?.length > 0
+        ? [{ vector: visualData.appearance_embedding, captured_at: new Date(), event: context.event?.name, description_used: visualData.appearance?.description || '' }]
         : [],
       appearance: visualData.appearance,
       environment: visualData.environment,
@@ -133,8 +139,15 @@ export async function addInteractionToExistingConnection(connectionId, audioData
   if (!connection) throw new Error('Connection not found');
   if (connection.user_id.toString() !== userId.toString()) throw new Error('Unauthorized');
 
-  if (visualData.face_embedding && visualData.face_embedding.length === 128) {
-    await addFaceEmbeddingToHistory(connectionId, visualData.face_embedding, context);
+  // Update appearance embedding if we have appearance data
+  const name = connection.name?.value || '';
+  const appearanceDescription = visualData?.appearance?.description || '';
+  if (name || appearanceDescription) {
+    try {
+      await addAppearanceEmbedding(connectionId, name, appearanceDescription, context);
+    } catch (err) {
+      console.warn('Failed to update appearance embedding:', err.message);
+    }
   }
 
   const newTopics = audioData.topics_discussed || [];
@@ -228,7 +241,7 @@ export async function createInteractionRecord(userId, connectionId, audioData, v
     visual_snapshot: {
       appearance_at_time: visualData.appearance?.description,
       environment_at_time: visualData.environment?.description,
-      face_embedding: visualData.face_embedding,
+      appearance_embedding: visualData.appearance_embedding,  // 1536-dim text embedding
     },
     context: context,
   });

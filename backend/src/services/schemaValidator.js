@@ -64,9 +64,26 @@ const HeadshotSchema = z.object({
   base64: z.string().nullable().optional(),
 }).optional();
 
+// Face embedding schema (128-dim, deprecated - kept for backwards compatibility)
+const FaceEmbeddingSchema = z.array(z.number())
+  .refine(arr => arr.length === 0 || arr.length === 128, {
+    message: 'Face embedding must be empty or 128 dimensions (deprecated)',
+  })
+  .optional()
+  .default([]);
+
+// Appearance embedding schema (1536-dim text embeddings from OpenAI/Claude)
+const AppearanceEmbeddingSchema = z.array(z.number())
+  .refine(arr => arr.length === 0 || arr.length === 1536, {
+    message: 'Appearance embedding must be empty or 1536 dimensions',
+  })
+  .optional()
+  .default([]);
+
 // Visual data schema (from visualParser)
 export const VisualDataSchema = z.object({
-  face_embedding: z.array(z.number()).optional().default([]),
+  face_embedding: FaceEmbeddingSchema, // Deprecated: 128-dim face-api.js embeddings
+  appearance_embedding: AppearanceEmbeddingSchema, // New: 1536-dim text embeddings
   appearance: AppearanceSchema.optional(),
   environment: EnvironmentSchema.optional(),
   headshot: HeadshotSchema.optional(),
@@ -123,17 +140,52 @@ export function validateVisualData(data) {
 }
 
 /**
- * Validates face embedding array
+ * Validates face embedding array (128-dim, deprecated)
+ * Now accepts empty arrays as valid since face embeddings are deprecated
  * @param {Array} embedding - Face embedding array
- * @returns {boolean} - True if valid
+ * @returns {boolean} - True if valid (empty or 128 dimensions)
  */
 export function validateFaceEmbedding(embedding) {
   try {
-    z.array(z.number()).length(128).parse(embedding);
-    return true;
+    if (!Array.isArray(embedding)) return false;
+    // Accept empty arrays or 128-dim arrays (deprecated format)
+    if (embedding.length === 0) return true;
+    if (embedding.length === 128) {
+      z.array(z.number()).length(128).parse(embedding);
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Validates appearance embedding array (1536-dim text embeddings)
+ * @param {Array} embedding - Appearance embedding array
+ * @returns {boolean} - True if valid (empty or 1536 dimensions)
+ */
+export function validateAppearanceEmbedding(embedding) {
+  try {
+    if (!Array.isArray(embedding)) return false;
+    if (embedding.length === 0) return true;
+    if (embedding.length === 1536) {
+      z.array(z.number()).length(1536).parse(embedding);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validates any embedding array (supports both 128-dim and 1536-dim)
+ * @param {Array} embedding - Embedding array
+ * @returns {boolean} - True if valid
+ */
+export function validateEmbedding(embedding) {
+  return validateFaceEmbedding(embedding) || validateAppearanceEmbedding(embedding);
 }
 
 /**

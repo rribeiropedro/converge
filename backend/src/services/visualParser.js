@@ -1,4 +1,4 @@
-import { generateFaceEmbedding } from './faceEmbeddingService.js';
+import { generateTextEmbedding } from './textEmbeddingService.js';
 import { validateVisualData, validateFaceEmbedding } from './schemaValidator.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -27,19 +27,31 @@ async function callOpenRouter(prompt) {
   return data.choices[0].message.content;
 }
 
-const VISUAL_EXTRACTION_PROMPT = `You are an AI assistant that extracts structured visual profile data from video/image analysis.
+const VISUAL_EXTRACTION_PROMPT = `You are an AI assistant that extracts structured visual profile data for PERSON IDENTIFICATION.
 
-Analyze the following visual data from a networking conversation and extract:
-1. Appearance description (clothing, hair, distinguishing features)
-2. Distinctive features that would help identify this person later
-3. Environment description (where the conversation took place)
-4. Landmarks or notable items in the environment
+Your goal is to create a description that uniquely identifies THIS SPECIFIC PERSON across multiple encounters, even if they change clothes.
+
+PRIORITIZE these PERSISTENT PHYSICAL FEATURES (in order of importance):
+1. FACE: Face shape (round, oval, square), facial hair (beard, mustache, clean-shaven), skin tone
+2. HAIR: Color, length, style (curly, straight, bald, receding hairline), facial hair
+3. GLASSES: Whether they wear glasses, frame style/color
+4. HEIGHT/BUILD: Tall, short, average, slim, athletic, heavy-set
+5. AGE RANGE: Approximate age (20s, 30s, 40s, etc.)
+6. DISTINCTIVE MARKS: Tattoos, piercings, scars, birthmarks, unique features
+
+SECONDARY (mention but don't rely on):
+- Clothing style (formal, casual, tech) - general pattern only, not specific items
+- Accessories that seem permanent (wedding ring, religious symbols)
+
+DO NOT focus on:
+- Specific clothing items (these change daily)
+- Temporary accessories (conference badges, bags)
 
 Return ONLY valid JSON in this exact format:
 {
   "appearance": {
-    "description": "Natural language description of how the person looks",
-    "distinctive_features": ["feature1", "feature2"]
+    "description": "Concise description focusing on PERSISTENT PHYSICAL FEATURES that uniquely identify this person. Example: 'Tall man, early 30s, short brown hair, full beard, wears rectangular glasses, athletic build'",
+    "distinctive_features": ["most unique identifying feature 1", "most unique identifying feature 2"]
   },
   "environment": {
     "description": "Natural language description of the location/setting",
@@ -47,7 +59,7 @@ Return ONLY valid JSON in this exact format:
   }
 }
 
-Be specific and memorable - focus on details that would help someone recognize this person or remember where they met.`;
+Remember: The appearance description will be combined with the person's NAME for identity matching. Focus on features that distinguish THIS person from others with similar names.`;
 
 export async function parseVisualData(visualInput) {
   if (!visualInput) {
@@ -111,19 +123,19 @@ export async function parseVisualData(visualInput) {
   // Normalize to ensure proper structure
   const normalizedVisual = normalizeVisualData(validatedVisual);
 
+  // Generate appearance embedding from appearance description (for text-based matching)
   if (
-    normalizedVisual.headshot &&
-    (normalizedVisual.headshot.url || normalizedVisual.headshot.base64) &&
-    (!normalizedVisual.face_embedding || normalizedVisual.face_embedding.length === 0)
+    normalizedVisual.appearance?.description &&
+    (!normalizedVisual.appearance_embedding || normalizedVisual.appearance_embedding.length === 0)
   ) {
     try {
-      const imageData = normalizedVisual.headshot.base64 || normalizedVisual.headshot.url;
-      normalizedVisual.face_embedding = await generateFaceEmbedding(imageData);
-      
-      console.log('Generated 128-dim face embedding for headshot.');
+      const appearanceText = normalizedVisual.appearance.description;
+      normalizedVisual.appearance_embedding = await generateTextEmbedding(appearanceText);
+
+      console.log('Generated 1536-dim appearance embedding from description.');
     } catch (error) {
-      console.warn('Failed to generate face embedding from headshot:', error.message);
-      normalizedVisual.face_embedding = [];
+      console.warn('Failed to generate appearance embedding:', error.message);
+      normalizedVisual.appearance_embedding = [];
     }
   }
 
@@ -132,17 +144,18 @@ export async function parseVisualData(visualInput) {
 
 export function normalizeVisualData(visualData) {
   return {
-    face_embedding: visualData.face_embedding || [],
+    face_embedding: visualData.face_embedding || [],  // Deprecated, kept for migration
+    appearance_embedding: visualData.appearance_embedding || [],  // 1536-dim text embedding
     appearance: {
       description: visualData.appearance?.description || '',
-      distinctive_features: Array.isArray(visualData.appearance?.distinctive_features) 
-        ? visualData.appearance.distinctive_features 
+      distinctive_features: Array.isArray(visualData.appearance?.distinctive_features)
+        ? visualData.appearance.distinctive_features
         : [],
     },
     environment: {
       description: visualData.environment?.description || '',
-      landmarks: Array.isArray(visualData.environment?.landmarks) 
-        ? visualData.environment.landmarks 
+      landmarks: Array.isArray(visualData.environment?.landmarks)
+        ? visualData.environment.landmarks
         : [],
     },
     headshot: {
