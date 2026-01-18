@@ -201,6 +201,11 @@ export default function AgentPage() {
               // Agent transcription (what the agent is saying)
               // UI schemas are now sent via DataReceived event, not in transcription
               setMessages(prev => {
+                // Skip empty messages
+                if (!message || !message.trim()) {
+                  return prev
+                }
+                
                 // Remove any interim agent messages with the same segment ID
                 const filtered = prev.filter(m => 
                   !(m.type === 'agent' && m.segmentId === segmentId && m.isInterim)
@@ -218,6 +223,15 @@ export default function AgentPage() {
             } else {
               // User transcription (what the user said)
               setMessages(prev => {
+                // Skip empty messages (but still remove interim if this is final)
+                if (!message || !message.trim()) {
+                  if (isFinal) {
+                    // Remove interim but don't add empty final
+                    return prev.filter(m => !(m.isInterim && m.segmentId === segmentId))
+                  }
+                  return prev
+                }
+                
                 const lastMsg = prev[prev.length - 1]
                 if (lastMsg?.isInterim && lastMsg.type === 'user' && lastMsg.segmentId === segmentId) {
                   // Update interim transcription
@@ -544,6 +558,7 @@ export default function AgentPage() {
         {messages.length > 0 && (
           <div className="w-full max-w-xl flex-1 overflow-y-auto mb-4 space-y-3 px-2">
             {messages.map((message, index) => {
+              
               // Check if this is a profile card and if there are consecutive profile cards
               const isProfile = message.type === "profile"
               const prevMessage = messages[index - 1]
