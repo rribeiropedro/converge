@@ -7,6 +7,15 @@ import { type Connection, type Edge, connections as allConnections, edges as all
 import { GraphLegend } from "./graph-legend"
 import { Calendar, MapPin } from "lucide-react"
 
+// Helper function to get initials from a name
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .filter(part => part.length > 0)
+    .map(part => part.charAt(0).toUpperCase())
+    .join('')
+}
+
 interface NetworkGraphProps {
   connections: Connection[]
   edges: Edge[]
@@ -363,8 +372,25 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode, grou
         .attr("r", NODE_RADIUS)
     })
 
-    // Add avatar images
-    node.append("image")
+    // Add fallback background circle for nodes without avatars
+    node.filter(d => !d.connection.avatarUrl)
+      .append("circle")
+      .attr("r", NODE_RADIUS)
+      .style("fill", "var(--muted)")
+
+    // Add initials text for nodes without avatars
+    node.filter(d => !d.connection.avatarUrl)
+      .append("text")
+      .attr("text-anchor", "middle")
+      .attr("dy", "0.35em")
+      .style("fill", "var(--muted-foreground)")
+      .attr("font-size", NODE_RADIUS * 0.8)
+      .attr("font-weight", "600")
+      .text(d => getInitials(d.connection.name))
+
+    // Add avatar images only for nodes with avatars
+    node.filter(d => !!d.connection.avatarUrl)
+      .append("image")
       .attr("xlink:href", d => d.connection.avatarUrl)
       .attr("x", -NODE_RADIUS)
       .attr("y", -NODE_RADIUS)
@@ -450,13 +476,19 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode, grou
             {/* Header with Avatar */}
             <div className="flex items-start gap-2.5">
               <div className="relative h-10 w-10 rounded overflow-hidden border border-border flex-shrink-0">
-                <Image
-                  src={tooltip.connection.avatarUrl}
-                  alt={tooltip.connection.name}
-                  width={40}
-                  height={40}
-                  className="object-cover"
-                />
+                {tooltip.connection.avatarUrl ? (
+                  <Image
+                    src={tooltip.connection.avatarUrl}
+                    alt={tooltip.connection.name}
+                    width={40}
+                    height={40}
+                    className="object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-muted flex items-center justify-center text-sm font-semibold text-muted-foreground">
+                    {getInitials(tooltip.connection.name)}
+                  </div>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-foreground truncate">
