@@ -256,8 +256,24 @@ export async function approveConnection(connectionId, updates = {}) {
     throw new Error('Only draft connections can be approved');
   }
 
+  // Fields that have nested {value, confidence, source} structure
+  const nestedValueFields = ['name', 'company', 'role', 'institution', 'major'];
+
   for (const [path, value] of Object.entries(updates)) {
     const keys = path.split('.');
+    
+    // Handle top-level updates for nested value fields (e.g., "name": "John" -> "name.value": "John")
+    if (keys.length === 1 && nestedValueFields.includes(keys[0]) && typeof value === 'string') {
+      // Preserve existing confidence/source or use defaults for manual edits
+      const existing = connection[keys[0]] || {};
+      connection[keys[0]] = {
+        value: value,
+        confidence: existing.confidence || 'high',
+        source: 'manual',
+      };
+      continue;
+    }
+
     let current = connection;
     for (let i = 0; i < keys.length - 1; i++) {
       if (!current[keys[i]]) current[keys[i]] = {};

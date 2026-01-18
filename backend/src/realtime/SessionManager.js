@@ -172,6 +172,11 @@ class SessionManager {
       session.visual.face_embedding = visualData.face_embedding;
     }
     
+    // Update speaking state if provided
+    if (typeof visualData.is_speaking === 'boolean') {
+      session.visual.is_speaking = visualData.is_speaking;
+    }
+    
     if (visualData.appearance) {
       session.visual.appearance = {
         description: visualData.appearance.description || session.visual.appearance.description,
@@ -443,4 +448,8 @@ class SessionManager {
 
 // Export singleton instance
 export default new SessionManager();
+
+
+
+
 

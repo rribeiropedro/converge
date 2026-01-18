@@ -113,9 +113,18 @@ export const registerSessionSocket = (io) => {
 
         if (!transcript) return;
 
-        // Feed transcript to LiveInsightEngine for real-time LLM extraction
+        // Extract timing info from words array for speaker correlation
+        const firstWord = words[0];
+        const lastWord = words[words.length - 1];
+        const timing = (firstWord && lastWord && firstWord.speaker !== undefined) ? {
+          speakerId: firstWord.speaker,
+          startTime: firstWord.start,
+          endTime: lastWord.end
+        } : null;
+
+        // Feed transcript to LiveInsightEngine with timing info
         if (insightEngine) {
-          insightEngine.addTranscript(transcript, data.is_final);
+          insightEngine.addTranscript(transcript, data.is_final, timing);
         }
 
         // Update session with transcript chunk
@@ -231,8 +240,21 @@ export const registerSessionSocket = (io) => {
 
             console.log(`  📋 Parsed Overshoot Result:`);
             console.log(`    face_detected: ${parsedResult.face_detected}`);
+            console.log(`    is_speaking: ${parsedResult.is_speaking ? '🗣️ YES' : '🤐 NO'}`);
             console.log(`    appearance_profile: ${parsedResult.appearance_profile ? 'Present' : 'Missing'}`);
             console.log(`    environment_context: ${parsedResult.environment_context ? 'Present' : 'Missing'}`);
+            
+            // Update LiveInsightEngine with visual speaking state for speaker correlation
+            if (insightEngine && data.captureTime !== undefined && data.captureTime !== null) {
+              const isSpeaking = parsedResult.is_speaking === true;
+              insightEngine.updateVisualState(data.captureTime, isSpeaking);
+              
+              // Log correlation status
+              const status = insightEngine.getCorrelationStatus();
+              if (status.correlated !== null) {
+                console.log(`  [Correlation] Target: S${status.correlated} | ${status.scores} | Events: ${status.visualEvents}`);
+              }
+            }
           } catch (e) {
             console.log(`  ⚠️ Could not parse result as JSON`);
           }
@@ -435,6 +457,12 @@ export const registerSessionSocket = (io) => {
         console.log(`[SessionSocket] ════════════════════════════════════════════════`);
         console.log(`[SessionSocket] 🔚 ENDING SESSION: ${currentSessionId}`);
         console.log(`[SessionSocket] ════════════════════════════════════════════════`);
+
+        // Log final correlation status before cleanup
+        if (insightEngine) {
+          const status = insightEngine.getCorrelationStatus();
+          console.log(`[Session End] Correlation: ${status.correlated !== null ? `S${status.correlated}` : 'none'} | ${status.scores}`);
+        }
 
         // Get LiveInsightEngine's extracted data (real-time LLM extractions)
         const insightState = insightEngine ? insightEngine.getFinalState() : null;
@@ -756,4 +784,8 @@ export const registerSessionSocket = (io) => {
     }
   }, 60 * 1000); // Check every minute
 };
+
+
+
+
 

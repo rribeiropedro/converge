@@ -52,6 +52,12 @@ class LiveInsightEngine {
       personal: []
     };
     
+    // Speaker correlation tracking
+    this.speakerBuffers = new Map();      // speakerId -> { text: '', timings: [] }
+    this.visualSpeakingEvents = [];        // [{ time, isSpeaking }, ...]
+    this.correlatedSpeaker = null;         // Identified in-frame speaker ID
+    this.correlationConfidence = 0;        // 0-1 confidence score
+    
     // Debounce timer
     this.debounceTimer = null;
     this.DEBOUNCE_MS = 3000; // Process every 3 seconds
@@ -64,16 +70,118 @@ class LiveInsightEngine {
   }
 
   /**
-   * Called when new transcript chunk arrives from Deepgram
-   * @param {string} chunk - New transcript text
-   * @param {boolean} isFinal - Whether this is a final transcript
+   * Called when visual update arrives with is_speaking state
    */
-  addTranscript(chunk, isFinal) {
+  updateVisualState(captureTime, isSpeaking) {
+    this.visualSpeakingEvents.push({ time: captureTime, isSpeaking });
+    
+    // Keep last 60 seconds of events
+    const cutoff = captureTime - 60;
+    this.visualSpeakingEvents = this.visualSpeakingEvents.filter(e => e.time > cutoff);
+    
+    this.attemptCorrelation();
+  }
+
+  /**
+   * Attempt to correlate visual speaking events with audio speaker IDs
+   */
+  attemptCorrelation() {
+    const speakingEvents = this.visualSpeakingEvents.filter(e => e.isSpeaking);
+    if (speakingEvents.length < 3 || this.speakerBuffers.size < 2) return;
+    
+    const scores = new Map();
+    
+    for (const [speakerId, buffer] of this.speakerBuffers) {
+      let overlapCount = 0;
+      for (const visual of speakingEvents) {
+        // 1.5s tolerance for async timing
+        const hasOverlap = buffer.timings.some(audio => 
+          (visual.time >= audio.start - 1.5 && visual.time <= audio.end + 1.5)
+        );
+        if (hasOverlap) overlapCount++;
+      }
+      scores.set(speakerId, overlapCount / speakingEvents.length);
+    }
+    
+    // Find best speaker (>50% threshold)
+    let bestSpeaker = null;
+    let bestScore = 0.5;
+    for (const [speakerId, score] of scores) {
+      if (score > bestScore) {
+        bestScore = score;
+        bestSpeaker = speakerId;
+      }
+    }
+    
+    if (bestSpeaker !== null && this.correlatedSpeaker !== bestSpeaker) {
+      this.correlatedSpeaker = bestSpeaker;
+      this.correlationConfidence = bestScore;
+      
+      // Rebuild buffer from correlated speaker
+      const correlatedBuffer = this.speakerBuffers.get(bestSpeaker);
+      if (correlatedBuffer) {
+        this.transcriptBuffer = correlatedBuffer.text;
+        this.lastProcessedLength = 0;
+      }
+    }
+  }
+
+  /**
+   * Get correlation status for debug output
+   */
+  getCorrelationStatus() {
+    const speakerScores = [];
+    const speakingEvents = this.visualSpeakingEvents.filter(e => e.isSpeaking);
+    
+    for (const [speakerId, buffer] of this.speakerBuffers) {
+      let overlapCount = 0;
+      for (const visual of speakingEvents) {
+        const hasOverlap = buffer.timings.some(audio => 
+          (visual.time >= audio.start - 1.5 && visual.time <= audio.end + 1.5)
+        );
+        if (hasOverlap) overlapCount++;
+      }
+      const score = speakingEvents.length > 0 ? overlapCount / speakingEvents.length : 0;
+      speakerScores.push(`S${speakerId}:${Math.round(score * 100)}%`);
+    }
+    
+    return {
+      correlated: this.correlatedSpeaker,
+      scores: speakerScores.join(' '),
+      visualEvents: speakingEvents.length
+    };
+  }
+
+  /**
+   * Called when new transcript chunk arrives from Deepgram
+   */
+  addTranscript(chunk, isFinal, timing = null) {
     if (!chunk || chunk.trim().length === 0) return;
     
-    this.transcriptBuffer += ' ' + chunk.trim();
+    // Track per-speaker buffers and timings
+    if (timing && timing.speakerId !== undefined) {
+      const speakerId = timing.speakerId;
+      
+      if (!this.speakerBuffers.has(speakerId)) {
+        this.speakerBuffers.set(speakerId, { text: '', timings: [] });
+      }
+      
+      const buffer = this.speakerBuffers.get(speakerId);
+      buffer.text += ' ' + chunk.trim();
+      buffer.timings.push({ start: timing.startTime, end: timing.endTime });
+      
+      this.attemptCorrelation();
+      
+      // Only add to main buffer if correlated speaker (or not yet identified)
+      if (this.correlatedSpeaker === null || speakerId === this.correlatedSpeaker) {
+        this.transcriptBuffer += ' ' + chunk.trim();
+      } else {
+        return; // Filter out non-correlated speaker
+      }
+    } else {
+      this.transcriptBuffer += ' ' + chunk.trim();
+    }
     
-    // If final transcript and we have enough new content, process immediately
     if (isFinal && this.hasEnoughNewContent()) {
       this.processNow();
     } else if (this.hasEnoughNewContent()) {
@@ -191,11 +299,57 @@ class LiveInsightEngine {
     }
     
     try {
-      return JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      return this.normalizeExtraction(parsed);
     } catch (e) {
       console.warn('[LiveInsightEngine] Failed to parse LLM JSON:', e.message);
       return {};
     }
+  }
+
+  /**
+   * Normalize LLM output to expected schema
+   * LLMs sometimes return arrays instead of strings, objects instead of primitives, etc.
+   */
+  normalizeExtraction(raw) {
+    const profileFields = ['name', 'company', 'role', 'institution', 'major'];
+    const arrayFields = ['topics', 'challenges', 'hooks', 'personal'];
+    const normalized = {};
+
+    // Profile fields should be strings
+    for (const key of profileFields) {
+      const val = raw[key];
+      if (val == null) continue;
+      if (typeof val === 'string') {
+        normalized[key] = val;
+      } else if (Array.isArray(val) && val.length > 0) {
+        // LLM returned array instead of string - take first element
+        normalized[key] = typeof val[0] === 'string' ? val[0] : String(val[0]);
+      } else if (typeof val === 'object' && val.value) {
+        // LLM returned {value: "..."} object
+        normalized[key] = String(val.value);
+      } else {
+        normalized[key] = String(val);
+      }
+    }
+
+    // Array fields should be arrays of strings
+    for (const key of arrayFields) {
+      const val = raw[key];
+      if (val == null) continue;
+      if (Array.isArray(val)) {
+        normalized[key] = val.map(item => 
+          typeof item === 'string' ? item : 
+          (item && typeof item === 'object' && item.value) ? String(item.value) :
+          String(item)
+        ).filter(s => s && s.trim().length > 0);
+      } else if (typeof val === 'string') {
+        // LLM returned string instead of array - wrap it
+        normalized[key] = [val];
+      }
+    }
+
+    return normalized;
   }
 
   /**
@@ -362,7 +516,14 @@ class LiveInsightEngine {
       },
       
       // Raw transcript for final processing
-      fullTranscript: this.transcriptBuffer.trim()
+      fullTranscript: this.transcriptBuffer.trim(),
+      
+      // Speaker correlation metadata
+      speakerCorrelation: {
+        correlatedSpeakerId: this.correlatedSpeaker,
+        confidence: this.correlationConfidence,
+        totalSpeakersDetected: this.speakerBuffers.size
+      }
     };
 
     // Log final state for MongoDB
