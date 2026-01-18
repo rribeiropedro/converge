@@ -1,4 +1,5 @@
 import { generateFaceEmbedding } from './faceEmbeddingService.js';
+import { validateVisualData, validateFaceEmbedding } from './schemaValidator.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -67,7 +68,14 @@ export async function parseVisualData(visualInput) {
     parsedVisual = JSON.parse(jsonMatch[0]);
   }
 
-  const normalizedVisual = normalizeVisualData({ ...visualInput, ...parsedVisual });
+  // Merge input with parsed visual data
+  const mergedVisual = { ...visualInput, ...parsedVisual };
+  
+  // Validate with Zod schema (ensures alignment with MongoDB schema)
+  const validatedVisual = validateVisualData(mergedVisual);
+  
+  // Normalize to ensure proper structure
+  const normalizedVisual = normalizeVisualData(validatedVisual);
 
   if (
     normalizedVisual.headshot &&
@@ -109,8 +117,8 @@ export function normalizeVisualData(visualData) {
   };
 }
 
-export function validateFaceEmbedding(embedding) {
-  if (!Array.isArray(embedding)) return false;
-  if (embedding.length !== 128) return false;
-  return embedding.every(val => typeof val === 'number');
+// validateFaceEmbedding is now imported from schemaValidator.js
+// This function is kept for backward compatibility but uses Zod validation
+export function validateFaceEmbeddingLocal(embedding) {
+  return validateFaceEmbedding(embedding);
 }
