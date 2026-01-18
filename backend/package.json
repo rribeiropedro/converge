@@ -6,11 +6,16 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "agent": "node src/agent/voiceAgent.js dev",
+    "agent:dev": "nodemon src/agent/voiceAgent.js dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@deepgram/sdk": "^3.6.1",
+    "@livekit/agents": "^1.0.36",
+    "@livekit/agents-plugin-openai": "^1.0.36",
+    "@livekit/agents-plugin-silero": "^1.0.36",
     "@tensorflow/tfjs-node": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "canvas": "^3.2.1",
@@ -18,6 +23,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.3",
+    "livekit-server-sdk": "^2.15.0",
     "mongoose": "^8.5.0",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^3.3.2",

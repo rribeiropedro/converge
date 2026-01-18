@@ -1,7 +1,8 @@
 "use client"
 
-import React from "react"
+import React, { useEffect, useRef } from "react"
 import { useState } from "react"
+import { Room, RoomEvent, Track, RemoteTrack, RemoteTrackPublication, RemoteParticipant } from "livekit-client"
 import { cn } from "@/lib/utils"
 import { connections } from "@/lib/data"
 import { ConnectionProfileCard, type MongoDBConnection } from "@/components/connection-profile-card"
@@ -14,6 +15,7 @@ interface Message {
   content: string
   componentTitle?: string
   profileData?: MongoDBConnection
+  isInterim?: boolean // For live transcription
 }
 
 const promptChips = [
@@ -106,6 +108,200 @@ export default function AgentPage() {
   const [state, setState] = useState<AgentState>("idle")
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
+  const [isConnected, setIsConnected] = useState(false)
+  const [isMicEnabled, setIsMicEnabled] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
+  
+  const roomRef = useRef<Room | null>(null)
+  const audioElementRef = useRef<HTMLAudioElement>(null)
+
+  // Connect to LiveKit room (only after user interaction)
+  const connectToRoom = async () => {
+    if (roomRef.current || isConnecting) return
+    
+    setIsConnecting(true)
+    try {
+        const roomName = `agent-room-${Date.now()}`
+        const participantName = `user-${Date.now()}`
+
+        // Get token from your API
+        const tokenResponse = await fetch('/api/livekit/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomName, participantName }),
+        })
+
+        if (!tokenResponse.ok) {
+          throw new Error('Failed to get token')
+        }
+
+        const { token, url } = await tokenResponse.json()
+
+        const room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+        })
+
+        // Event handlers
+        room.on(RoomEvent.Connected, () => {
+          console.log('✅ Connected to LiveKit room')
+          setIsConnected(true)
+        })
+
+        room.on(RoomEvent.Disconnected, () => {
+          console.log('❌ Disconnected from LiveKit room')
+          setIsConnected(false)
+          setState("idle")
+        })
+
+        // Subscribe to agent audio
+        room.on(RoomEvent.TrackSubscribed, async (
+          track: RemoteTrack,
+          publication: RemoteTrackPublication,
+          participant: RemoteParticipant
+        ) => {
+          if (track.kind === Track.Kind.Audio && participant.identity.includes('agent')) {
+            if (audioElementRef.current) {
+              track.attach(audioElementRef.current)
+              // Resume audio context and play after user interaction
+              try {
+                await audioElementRef.current.play()
+              } catch (error) {
+                console.warn('Audio playback requires user interaction:', error)
+              }
+              setState("responding")
+            }
+          }
+        })
+
+        room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+          track.detach()
+          if (state === "responding") {
+            setState("idle")
+          }
+        })
+
+        // Listen for data messages (transcriptions, text responses)
+        room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
+          try {
+            const decoder = new TextDecoder()
+            const data = JSON.parse(decoder.decode(payload))
+            
+            if (data.type === 'transcription') {
+              // User transcription
+              setMessages(prev => {
+                const lastMsg = prev[prev.length - 1]
+                if (lastMsg?.isInterim && lastMsg.type === 'user') {
+                  // Update interim transcription
+                  return [...prev.slice(0, -1), { ...lastMsg, content: data.text, isInterim: !data.isFinal }]
+                } else if (!data.isFinal) {
+                  // New interim transcription
+                  return [...prev, {
+                    id: Date.now().toString(),
+                    type: "user",
+                    content: data.text,
+                    isInterim: true,
+                  }]
+                } else {
+                  // Final transcription
+                  return [...prev.filter(m => !m.isInterim), {
+                    id: Date.now().toString(),
+                    type: "user",
+                    content: data.text,
+                    isInterim: false,
+                  }]
+                }
+              })
+            } else if (data.type === 'agent_response') {
+              // Agent text response
+              setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                type: "agent",
+                content: data.text,
+              }])
+            }
+          } catch (error) {
+            console.error('Error parsing data message:', error)
+          }
+        })
+
+        await room.connect(url, token)
+        roomRef.current = room
+
+        // Resume audio context after user interaction
+        if (audioElementRef.current) {
+          try {
+            await audioElementRef.current.play()
+          } catch (error) {
+            console.warn('Audio play failed, will retry on user interaction:', error)
+          }
+        }
+
+      } catch (error) {
+        console.error('Failed to connect to LiveKit:', error)
+        setIsConnected(false)
+      } finally {
+        setIsConnecting(false)
+      }
+  }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Disconnect room (this will clean up all tracks automatically)
+      if (roomRef.current) {
+        roomRef.current.disconnect()
+      }
+    }
+  }, [])
+
+  // Connect to room (triggered by user interaction)
+  const handleConnect = async () => {
+    if (!isConnected && !isConnecting) {
+      await connectToRoom()
+    }
+  }
+
+  // Toggle microphone
+  const toggleMicrophone = async () => {
+    // If not connected, connect first
+    if (!isConnected) {
+      await handleConnect()
+      return
+    }
+
+    if (!roomRef.current) return
+
+    try {
+      if (!isMicEnabled) {
+        // Enable microphone - setMicrophoneEnabled handles permission, track creation, and publishing
+        await roomRef.current.localParticipant.setMicrophoneEnabled(true)
+        setIsMicEnabled(true)
+        setState("listening")
+        console.log('✅ Microphone enabled')
+        
+        // Resume audio context for playback
+        if (audioElementRef.current) {
+          try {
+            await audioElementRef.current.play()
+          } catch (error) {
+            console.warn('Audio play failed:', error)
+          }
+        }
+      } else {
+        // Disable microphone
+        await roomRef.current.localParticipant.setMicrophoneEnabled(false)
+        setIsMicEnabled(false)
+        setState("idle")
+        console.log('🔇 Microphone disabled')
+      }
+    } catch (error) {
+      console.error('Error toggling microphone:', error)
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        alert('Microphone permission is required. Please allow microphone access and try again.')
+      }
+    }
+  }
 
   const handlePrompt = async (prompt: string) => {
     const userMessage: Message = {
@@ -151,9 +347,34 @@ export default function AgentPage() {
     setTimeout(() => setState("idle"), 500)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (inputValue.trim() && state === "idle") {
+    if (!inputValue.trim()) return
+
+    // If connected to LiveKit, send text message
+    if (roomRef.current && isConnected) {
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        type: "user",
+        content: inputValue,
+      }
+      setMessages(prev => [...prev, userMessage])
+
+      try {
+        const encoder = new TextEncoder()
+        const data = JSON.stringify({ type: 'text_message', text: inputValue })
+        await roomRef.current.localParticipant.publishData(encoder.encode(data))
+        setState("responding")
+      } catch (error) {
+        console.error('Error sending text message:', error)
+      }
+
+      setInputValue("")
+      return
+    }
+
+    // Fallback to mock implementation if not connected
+    if (state === "idle") {
       handlePrompt(inputValue.trim())
     }
   }
@@ -163,19 +384,31 @@ export default function AgentPage() {
       {/* Header - Notion style */}
       <header className="h-[45px] flex items-center justify-center border-b border-border px-4 pl-[52px] md:pl-4">
         <h1 className="text-sm font-medium">Network Agent</h1>
+        {isConnected && (
+          <span className="ml-2 text-xs text-green-500">● Connected</span>
+        )}
+        {isConnecting && (
+          <span className="ml-2 text-xs text-yellow-500">Connecting...</span>
+        )}
+        {!isConnected && !isConnecting && (
+          <span className="ml-2 text-xs text-muted-foreground">Click to connect</span>
+        )}
       </header>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-6 overflow-hidden">
         {/* Orb - Notion style subtle */}
         <div className="relative mb-6">
-          <div
+          <button
+            onClick={isConnected ? toggleMicrophone : handleConnect}
+            disabled={isConnecting}
             className={cn(
-              "relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300",
+              "relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer",
               state === "idle" && "bg-[var(--notion-blue-bg)]",
               state === "listening" && "bg-[var(--notion-blue-bg)] scale-110",
               state === "responding" && "bg-[var(--notion-blue-bg)]",
-              state === "done" && "bg-[var(--notion-blue-bg)]"
+              state === "done" && "bg-[var(--notion-blue-bg)]",
+              isConnecting && "opacity-50 cursor-wait"
             )}
           >
             {/* Pulse ring */}
@@ -216,12 +449,15 @@ export default function AgentPage() {
                 </svg>
               )}
             </div>
-          </div>
+          </button>
           
           {/* State label */}
           <p className="text-center mt-3 text-xs text-muted-foreground h-4">
-            {state === "listening" && "Listening..."}
-            {state === "responding" && "Thinking..."}
+            {isConnecting && "Connecting..."}
+            {!isConnected && !isConnecting && "Click to connect"}
+            {isConnected && state === "listening" && "Listening..."}
+            {isConnected && state === "responding" && "Thinking..."}
+            {isConnected && state === "idle" && "Click to speak"}
           </p>
         </div>
 
@@ -277,8 +513,12 @@ export default function AgentPage() {
                   )}
                 >
                   {message.type === "user" ? (
-                    <div className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground">
+                    <div className={cn(
+                      "rounded bg-primary px-3 py-2 text-sm text-primary-foreground",
+                      message.isInterim && "opacity-60"
+                    )}>
                       {message.content}
+                      {message.isInterim && "..."}
                     </div>
                   ) : message.type === "agent" ? (
                     <div className="rounded bg-card border border-border px-3 py-2 text-sm">
@@ -319,12 +559,12 @@ export default function AgentPage() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="Ask about your network..."
-              disabled={state !== "idle"}
+              disabled={state !== "idle" || !isConnected}
               className="w-full rounded border border-border bg-card px-4 py-3 pr-12 text-sm placeholder-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
             <button
               type="submit"
-              disabled={!inputValue.trim() || state !== "idle"}
+              disabled={!inputValue.trim() || state !== "idle" || !isConnected}
               className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -333,6 +573,9 @@ export default function AgentPage() {
             </button>
           </div>
         </form>
+
+        {/* Hidden audio element for agent audio playback */}
+        <audio ref={audioElementRef} autoPlay />
       </main>
     </div>
   )

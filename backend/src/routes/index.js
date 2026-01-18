@@ -4,11 +4,13 @@ import transcribeRoutes from './transcribeRoutes.js';
 
 import connectionRoutes from './connectionRoutes.js';
 import overshootRoutes from './overshootRoutes.js';
+import livekitRoutes from './livekitRoutes.js';
 const router = express.Router();
 
 router.use('/users', userRoutes);
 router.use('/transcribe', transcribeRoutes);
 router.use('/connections', connectionRoutes);
+router.use('/livekit', livekitRoutes);
 router.use('/', overshootRoutes);
 
 router.get('/', (req, res) => {
@@ -21,6 +23,7 @@ router.get('/', (req, res) => {
       connections: '/api/connections',
       overshoot: '/api/overshoot-result',
       headshot: '/api/generate-headshot',
+      livekit: '/api/livekit/token',
       health: '/health'
     }
   });
