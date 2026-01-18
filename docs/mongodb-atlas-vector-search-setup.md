@@ -107,12 +107,17 @@ If Atlas Vector Search is not configured or fails, the application falls back to
 - Check that connections have `status: "approved"`
 - Ensure `visual.face_embedding` is populated
 
-## Thresholds
+## Thresholds (Simplified MVP)
 
 | Score Range | Action |
 |-------------|--------|
-| ≥ 0.85 | High confidence match - auto-recognize |
-| 0.70 - 0.84 | Uncertain - ask user to confirm |
-| < 0.70 | No match - create new connection |
+| ≥ 0.80 | Match found - auto-update existing connection |
+| < 0.80 | No match - create new connection |
 
-These thresholds can be adjusted in `backend/src/services/faceMatching.js`.
+**Workflow:**
+1. Extract face embedding from video
+2. Search MongoDB for matching faces (vector search)
+3. If match score ≥ 0.80: Update existing connection, add new interaction
+4. If match score < 0.80: Create new draft connection
+
+These thresholds can be adjusted in `backend/src/services/faceMatching.js` (MATCH_THRESHOLD constant).
