@@ -5,7 +5,7 @@ import { AuthProvider } from '@/contexts/auth-context'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'NexHacks - AI Network Memory',
+  title: 'Converge - Augmented Memory for Professional Networking',
   description: 'Remember and follow up with people you meet. Your personal AI-powered networking assistant.',
   generator: 'v0.app',
   icons: {
