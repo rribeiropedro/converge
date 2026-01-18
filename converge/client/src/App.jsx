@@ -38,8 +38,50 @@ function App() {
     }
   };
 
+  // Helper function to stop camera and vision SDK
+  const stopCamera = async () => {
+    try {
+      // Stop Overshoot SDK
+      if (visionRef.current) {
+        await visionRef.current.stop();
+        visionRef.current = null;
+      }
+      
+      // Stop camera stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
+      // Clear video preview
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      
+      setIsRunning(false);
+      setScreenshotBuffer([]); // Clear buffer
+    } catch (error) {
+      console.error('Error stopping camera:', error);
+    }
+  };
+
   // Send screenshots to Gemini API via server
   const sendScreenshotsToGemini = async (screenshots) => {
+    // Don't send if we already have a generated headshot
+    if (generatedImage) {
+      console.log('Headshot already generated, skipping...');
+      return;
+    }
+    
+    // Stop camera immediately after collecting 2 screenshots
+    await stopCamera();
+    setResults(prev => [...prev, {
+      text: '🛑 Camera stopped - Processing screenshots...',
+      timestamp: new Date().toLocaleTimeString(),
+      inferenceLatency: null,
+      totalLatency: null
+    }]);
+    
     setIsGenerating(true);
     try {
       const response = await fetch('/api/generate-headshot', {
@@ -61,6 +103,14 @@ function App() {
         setGeneratedImage(result.image);
         setResults(prev => [...prev, {
           text: '✅ Headshot generated successfully!',
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+        
+        // Camera is already stopped, just confirm completion
+        setResults(prev => [...prev, {
+          text: '✅ Headshot generation complete!',
           timestamp: new Date().toLocaleTimeString(),
           inferenceLatency: null,
           totalLatency: null
@@ -152,7 +202,8 @@ function App() {
             : result.result;
           
           // Check if face is detected and capture screenshot
-          if (parsedResult && parsedResult.face_detected === true) {
+          // Stop collecting if we already have a generated headshot
+          if (parsedResult && parsedResult.face_detected === true && !generatedImage) {
             const screenshotDataUrl = captureVideoFrame(videoRef.current);
             if (screenshotDataUrl) {
               // Add screenshot capture notification to results

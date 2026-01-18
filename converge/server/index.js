@@ -130,13 +130,55 @@ app.post('/api/generate-headshot', async (req, res) => {
 
     const result = await response.json();
     
-    // Debug: Log the response structure to understand the format
-    console.log('OpenRouter API response structure:', JSON.stringify(result, null, 2).substring(0, 500));
+    // Debug: Log the response structure (without full base64 to avoid truncation)
+    const debugResult = {
+      ...result,
+      choices: result.choices?.map(choice => ({
+        ...choice,
+        message: choice.message ? {
+          ...choice.message,
+          images: choice.message.images?.map(img => {
+            if (typeof img === 'string') {
+              return `[string: ${img.length} chars, starts with: ${img.substring(0, 50)}...]`;
+            }
+            if (img.image_url?.url) {
+              const url = img.image_url.url;
+              return {
+                ...img,
+                image_url: {
+                  ...img.image_url,
+                  url: url.length > 100 ? `[${url.length} chars, starts with: ${url.substring(0, 50)}...]` : url
+                }
+              };
+            }
+            return img;
+          })
+        } : choice.message
+      }))
+    };
+    console.log('OpenRouter API response structure:', JSON.stringify(debugResult, null, 2));
+    
+    // Specifically log the images array structure
+    if (result.choices?.[0]?.message?.images) {
+      const firstImage = result.choices[0].message.images[0];
+      console.log('First image type:', typeof firstImage);
+      console.log('First image keys:', firstImage ? Object.keys(firstImage) : 'null');
+      if (firstImage && typeof firstImage === 'object') {
+        console.log('First image structure:', {
+          type: firstImage.type,
+          hasImageUrl: !!firstImage.image_url,
+          imageUrlType: firstImage.image_url ? typeof firstImage.image_url : 'none',
+          imageUrlKeys: firstImage.image_url ? Object.keys(firstImage.image_url) : 'none',
+          urlLength: firstImage.image_url?.url ? firstImage.image_url.url.length : 'none'
+        });
+      }
+    }
     
     // Extract the generated image if available
     // OpenRouter returns responses in OpenAI format
     const message = result.choices?.[0]?.message;
     const content = message?.content;
+    const images = message?.images; // OpenRouter returns images in this array
     
     // Handle different response formats
     if (!message) {
@@ -145,6 +187,42 @@ app.post('/api/generate-headshot', async (req, res) => {
         error: 'No message in OpenRouter response',
         response: result
       });
+    }
+    
+    // Check if images array exists (OpenRouter format for image generation)
+    // According to OpenRouter docs, images are in format:
+    // [{ type: "image_url", image_url: { url: "data:image/png;base64,..." } }]
+    if (Array.isArray(images) && images.length > 0) {
+      const firstImage = images[0];
+      let imageUrl = null;
+      
+      // Handle OpenRouter's standard format: { type: "image_url", image_url: { url: "..." } }
+      if (firstImage.type === 'image_url' && firstImage.image_url?.url) {
+        imageUrl = firstImage.image_url.url;
+      }
+      // Fallback: handle if it's just { url: "..." }
+      else if (firstImage.url) {
+        imageUrl = firstImage.url;
+      }
+      // Fallback: handle if it's a string (base64)
+      else if (typeof firstImage === 'string') {
+        imageUrl = firstImage.startsWith('data:') ? firstImage : `data:image/png;base64,${firstImage}`;
+      }
+      // Fallback: handle if it's { data: "base64..." }
+      else if (firstImage.data) {
+        imageUrl = `data:image/png;base64,${firstImage.data}`;
+      }
+      
+      if (imageUrl) {
+        console.log('Successfully extracted image URL from OpenRouter response');
+        return res.json({ 
+          success: true, 
+          image: imageUrl,
+          text: typeof content === 'string' ? content : ''
+        });
+      } else {
+        console.error('Could not extract image URL from images array:', JSON.stringify(firstImage));
+      }
     }
     
     // Check if content is an array (multimodal response)
@@ -197,11 +275,13 @@ app.post('/api/generate-headshot', async (req, res) => {
     
     // If we get here, the format is unexpected
     console.error('Unexpected content format:', typeof content, content);
+    console.error('Images array:', images);
     return res.status(500).json({ 
       error: 'Unexpected response format from OpenRouter API',
       response: result,
       contentType: typeof content,
-      contentPreview: typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200)
+      contentPreview: typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200),
+      imagesArray: images
     });
 
   } catch (error) {
