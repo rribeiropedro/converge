@@ -16,19 +16,13 @@ function CameraRecorder() {
   const [sessionStatus, setSessionStatus] = useState('idle'); // idle, ready, recording, finalized
   const [isRecording, setIsRecording] = useState(false);
   const [audioTranscript, setAudioTranscript] = useState(null);
-  const [showInsightsOverlay, setShowInsightsOverlay] = useState(true);
-  const [profileImage, setProfileImage] = useState('https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop'); // Static test profile image
+  const [showInsightsOverlay, setShowInsightsOverlay] = useState(false);
+  const [profileImage, setProfileImage] = useState(null);
   
   // Insights overlay data - supports bullet points
-  // Can be updated dynamically via updateInsights() from socket events or API calls
+  // Updated dynamically when face_match_result is received from backend
   const [insightsData, setInsightsData] = useState({
-    items: [
-      { type: 'bullet', text: 'Professional networking event detected' },
-      { type: 'bullet', text: 'Topic: AI & Machine Learning' },
-      { type: 'bullet', text: 'Sentiment: Positive and engaging' },
-      { type: 'bullet', text: '3 key talking points identified' },
-      { type: 'bullet', text: 'Strong rapport building observed' }
-    ]
+    items: []
   });
   const visionRef = useRef(null);
 
@@ -317,8 +311,16 @@ function CameraRecorder() {
       // Listen for face match results
       sessionSocket.on('face_match_result', (data) => {
         console.log('🎯 Face match result received:', data);
+        
+        // Update insights overlay with received data
+        if (data && data.insights) {
+          setInsightsData({ items: data.insights });
+          setProfileImage(data.profileImage || null);
+          setShowInsightsOverlay(true);
+        }
+        
         setResults(prev => [...prev, {
-          text: `🎯 Face match result: ${data}`,
+          text: `🎯 Face match: ${data.matched ? data.name : 'New contact detected'}`,
           timestamp: new Date().toLocaleTimeString(),
           inferenceLatency: null,
           totalLatency: null
@@ -533,6 +535,11 @@ function CameraRecorder() {
       setIsRunning(false);
       setSessionId(null);
       setSessionStatus('idle');
+      
+      // Reset insights overlay for next session
+      setShowInsightsOverlay(false);
+      setInsightsData({ items: [] });
+      setProfileImage(null);
     } catch (error) {
       console.error('Error stopping vision:', error);
     }

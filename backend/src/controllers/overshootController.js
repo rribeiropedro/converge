@@ -326,8 +326,9 @@ async function performFaceMatching(imageUrl, sessionId) {
       faceEmbedding = await generateFaceEmbedding(imageUrl);
       console.log(`[FaceMatching] Generated face embedding with ${faceEmbedding.length} dimensions`);
     } catch (err) {
-      console.error(`[FaceMatching] Failed to generate face embedding:`, err.message);
-      // Update session with no match (couldn't generate embedding)
+      // Couldn't generate embedding - treat as new contact (not an error)
+      console.log(`[FaceMatching] Could not generate face embedding: ${err.message} - treating as new contact`);
+      
       SessionManager.updateFaceMatch(sessionId, {
         matched: false,
         connectionId: null,
@@ -335,10 +336,21 @@ async function performFaceMatching(imageUrl, sessionId) {
         connectionData: null
       });
       
-      // Emit update to client
+      // Emit new contact result to client
       const socket = getSocketBySessionId(sessionId);
       if (socket) {
-        socket.emit('face_match_result', 'TEST UI UPDATE');
+        socket.emit('face_match_result', {
+          matched: false,
+          name: 'New Contact',
+          company: null,
+          profileImage: null,
+          insights: [
+            { type: 'bullet', text: 'New person detected' },
+            { type: 'bullet', text: 'No previous connection found' },
+            { type: 'bullet', text: 'Professional networking context' },
+            { type: 'bullet', text: 'Ready to save new connection' }
+          ]
+        });
       }
       return;
     }
@@ -346,6 +358,9 @@ async function performFaceMatching(imageUrl, sessionId) {
     // Find matching connection in MongoDB
     const matches = await findMatchingConnection(userId, faceEmbedding);
     console.log(`[FaceMatching] Found ${matches.length} potential matches`);
+    
+    // Prepare face match result data for the UI overlay
+    let faceMatchResult;
     
     if (matches.length > 0) {
       // Best match found
@@ -363,6 +378,20 @@ async function performFaceMatching(imageUrl, sessionId) {
           score: bestMatch.score
         }
       });
+      
+      // Build result for UI with real data
+      faceMatchResult = {
+        matched: true,
+        name: bestMatch.connection.name,
+        company: bestMatch.connection.company,
+        profileImage: bestMatch.connection.profileImage || null,
+        insights: [
+          { type: 'bullet', text: `Name: ${bestMatch.connection.name}` },
+          { type: 'bullet', text: `Company: ${bestMatch.connection.company || 'Unknown'}` },
+          { type: 'bullet', text: `Match confidence: ${Math.round(bestMatch.score * 100)}%` },
+          { type: 'bullet', text: `Previous connection found` }
+        ]
+      };
     } else {
       // No match found - new person
       console.log(`[FaceMatching] No match found - this is a new person`);
@@ -373,13 +402,27 @@ async function performFaceMatching(imageUrl, sessionId) {
         name: null,
         connectionData: null
       });
+      
+      // Build mock result for UI (new person)
+      faceMatchResult = {
+        matched: false,
+        name: 'New Contact',
+        company: null,
+        profileImage: null,
+        insights: [
+          { type: 'bullet', text: 'New person detected' },
+          { type: 'bullet', text: 'No previous connection found' },
+          { type: 'bullet', text: 'Professional networking context' },
+          { type: 'bullet', text: 'Ready to save new connection' }
+        ]
+      };
     }
     
     // Emit update to client via WebSocket
     const socket = getSocketBySessionId(sessionId);
     if (socket) {
-      console.log(`[FaceMatching] Emitting face_match_result to client`);
-      socket.emit('face_match_result', 'TEST UI UPDATE');
+      console.log(`[FaceMatching] Emitting face_match_result to client:`, faceMatchResult);
+      socket.emit('face_match_result', faceMatchResult);
     } else {
       console.warn(`[FaceMatching] No socket found for session ${sessionId}`);
     }
