@@ -12,8 +12,20 @@ import { setAuthData } from "@/lib/auth"
 
 type AuthMode = "login" | "signup"
 
-// API configuration
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+// Get API URL dynamically based on current hostname
+// This allows the app to work when accessed from mobile devices via LAN IP
+const getApiUrl = () => {
+  if (typeof window === "undefined") {
+    return process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
+  }
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL
+  }
+  // Use the same hostname the browser is on, but port 3001
+  const protocol = window.location.protocol
+  const hostname = window.location.hostname
+  return `${protocol}//${hostname}:3001`
+}
 
 export default function AuthPage() {
   const router = useRouter()
@@ -52,9 +64,10 @@ export default function AuthPage() {
     
     try {
       // Determine the endpoint based on mode
+      const apiUrl = getApiUrl()
       const endpoint = mode === "login" 
-        ? `${API_URL}/api/users/login`
-        : `${API_URL}/api/users`
+        ? `${apiUrl}/api/users/login`
+        : `${apiUrl}/api/users`
       
       const response = await fetch(endpoint, {
         method: "POST",
@@ -83,7 +96,7 @@ export default function AuthPage() {
       console.error("Auth error:", error)
       // Check if it's a network/fetch error
       if (error instanceof TypeError && error.message === "Failed to fetch") {
-        setErrors({ general: "Cannot connect to server. Please make sure the backend server is running on port 5000." })
+        setErrors({ general: "Cannot connect to server. Please make sure the backend server is running on port 3001." })
       } else {
         setErrors({ general: "Network error. Please check your connection." })
       }
