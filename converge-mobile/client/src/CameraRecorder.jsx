@@ -296,6 +296,53 @@ function CameraRecorder() {
         }]);
       });
 
+      // Listen for live transcript insights (real-time LLM extraction)
+      sessionSocket.on('session:insights_update', (data) => {
+        console.log('📊 Live insights update:', data);
+        
+        // Build overlay items from full state - all items are complete sentences from LLM
+        const items = [];
+        
+        // Profile fields - already complete sentences (e.g. "His name is Pedro")
+        if (data.fullState.name) {
+          items.push({ type: 'bullet', text: data.fullState.name });
+        }
+        if (data.fullState.company) {
+          items.push({ type: 'bullet', text: data.fullState.company });
+        }
+        if (data.fullState.role) {
+          items.push({ type: 'bullet', text: data.fullState.role });
+        }
+        if (data.fullState.institution) {
+          items.push({ type: 'bullet', text: data.fullState.institution });
+        }
+        if (data.fullState.major) {
+          items.push({ type: 'bullet', text: data.fullState.major });
+        }
+        
+        // Array fields - already complete sentences
+        data.fullState.topics?.forEach(t => items.push({ type: 'bullet', text: t }));
+        data.fullState.challenges?.forEach(c => items.push({ type: 'bullet', text: c }));
+        data.fullState.hooks?.forEach(h => items.push({ type: 'bullet', text: h }));
+        data.fullState.personal?.forEach(p => items.push({ type: 'bullet', text: p }));
+        
+        // Update insights overlay
+        if (items.length > 0) {
+          setInsightsData({ items });
+          setShowInsightsOverlay(true);
+        }
+        
+        // Log new bullets to results feed
+        data.bullets?.forEach(bullet => {
+          setResults(prev => [...prev, {
+            text: `• ${bullet.text}`,
+            timestamp: new Date().toLocaleTimeString(),
+            inferenceLatency: null,
+            totalLatency: null
+          }]);
+        });
+      });
+
       sessionSocket.on('session:audio_update', (data) => {
         if (data.transcript_chunk) {
           // Update accumulated transcript for display

@@ -3,12 +3,14 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Mic, Settings, ChevronRight, LogOut, Users, ClipboardCheck, BarChart3 } from "lucide-react"
-import { logoutFromAPI, getUser } from "@/lib/auth"
+import { LayoutDashboard, Mic, Settings, ChevronRight, ChevronLeft, LogOut, Users, ClipboardCheck, BarChart3 } from "lucide-react"
+import { logoutFromAPI, getUser, type User } from "@/lib/auth"
 import { useState, useEffect } from "react"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { getConnectionCounts, ApiError } from "@/lib/api"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
 interface NavItem {
   label: string
@@ -48,12 +50,26 @@ const staticNavItems: NavItem[] = [
   },
 ]
 
-export function SidebarNav() {
+interface SidebarNavProps {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+function SidebarNavContent({ onLinkClick, onCollapse, showCollapseButton }: { 
+  onLinkClick?: () => void
+  onCollapse?: () => void
+  showCollapseButton?: boolean
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
   const [draftCount, setDraftCount] = useState(0)
-  const user = getUser()
+
+  // Only read from localStorage on client side after hydration
+  useEffect(() => {
+    setUser(getUser())
+  }, [])
 
   // Fetch draft count for badge
   useEffect(() => {
@@ -99,14 +115,24 @@ export function SidebarNav() {
   }
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col bg-sidebar border-r border-sidebar-border">
+    <>
       {/* Header - Notion style */}
       <div className="h-[45px] flex items-center gap-2 px-3 border-b border-sidebar-border">
         <div className="flex h-5 w-5 items-center justify-center rounded bg-primary">
           <span className="text-[10px] font-semibold text-primary-foreground">N</span>
         </div>
         <span className="text-sm font-medium">NexHacks</span>
-        <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto" />
+        {showCollapseButton ? (
+          <button
+            onClick={onCollapse}
+            className="ml-auto p-1 rounded hover:bg-[#3F4448] transition-colors"
+            aria-label="Close sidebar"
+          >
+            <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+          </button>
+        ) : (
+          <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto" />
+        )}
       </div>
       
       {/* Navigation - Notion style with subtle hover */}
@@ -120,6 +146,7 @@ export function SidebarNav() {
               <Link
                 key={item.href}
                 href={item.disabled ? "#" : item.href}
+                onClick={onLinkClick}
                 className={cn(
                   "flex items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors",
                   isActive
@@ -174,6 +201,41 @@ export function SidebarNav() {
           <span className="truncate">{isLoggingOut ? "Logging out..." : "Log out"}</span>
         </button>
       </div>
+    </>
+  )
+}
+
+export function SidebarNav({ open, onOpenChange }: SidebarNavProps) {
+  const isMobile = useIsMobile()
+
+  // On mobile, use Sheet component (hidden by default)
+  if (isMobile) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="left"
+          className="w-60 p-0 bg-sidebar border-sidebar-border [&>button]:hidden"
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>Navigation</SheetTitle>
+            <SheetDescription>Main navigation menu</SheetDescription>
+          </SheetHeader>
+          <div className="flex h-screen flex-col">
+            <SidebarNavContent 
+              onLinkClick={() => onOpenChange?.(false)} 
+              onCollapse={() => onOpenChange?.(false)}
+              showCollapseButton={true}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+    )
+  }
+
+  // On desktop, use fixed sidebar
+  return (
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col bg-sidebar border-r border-sidebar-border">
+      <SidebarNavContent />
     </aside>
   )
 }
