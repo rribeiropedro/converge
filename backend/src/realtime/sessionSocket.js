@@ -2,7 +2,8 @@ import SessionManager from './SessionManager.js';
 import { createLiveTranscriptionConnection, LiveTranscriptionEvents } from '../controllers/transcribeController.js';
 import { parseVisualData } from '../services/visualParser.js';
 import { parseTranscript } from '../services/transcriptParser.js';
-import { createDraftConnection } from '../services/processingService.js';
+import { createDraftConnection, addInteractionToExistingConnection } from '../services/processingService.js';
+import { findMatchingConnection } from '../services/faceMatching.js';
 
 const SESSION_NAMESPACE = '/api/session';
 
@@ -207,6 +208,78 @@ export const registerSessionSocket = (io) => {
         // Get updated session state
         const session = SessionManager.getSession(currentSessionId);
 
+        // Perform face matching immediately if we have a face embedding
+        if (parsedVisual.face_embedding && parsedVisual.face_embedding.length === 128) {
+          try {
+            const userId = session.userId;
+            const matches = await findMatchingConnection(userId, parsedVisual.face_embedding);
+            
+            if (matches.length > 0 && matches[0].score >= 0.80) {
+              // Match found - update session with match results
+              const bestMatch = matches[0];
+              SessionManager.updateFaceMatch(currentSessionId, {
+                matched: true,
+                connectionId: bestMatch.connection._id.toString(),
+                name: bestMatch.connection.name?.value || 'Unknown',
+                connectionData: {
+                  company: bestMatch.connection.company?.value || null,
+                  visual: bestMatch.connection.visual,
+                  score: bestMatch.score
+                }
+              });
+
+              // Emit face match result to client
+              socket.emit('face_match_result', {
+                matched: true,
+                name: bestMatch.connection.name?.value || 'Unknown',
+                company: bestMatch.connection.company?.value || null,
+                profileImage: bestMatch.connection.visual?.headshot?.url || null,
+                insights: [
+                  { type: 'bullet', text: `Name: ${bestMatch.connection.name?.value || 'Unknown'}` },
+                  { type: 'bullet', text: `Company: ${bestMatch.connection.company?.value || 'Unknown'}` },
+                  { type: 'bullet', text: `Match confidence: ${Math.round(bestMatch.score * 100)}%` },
+                  { type: 'bullet', text: 'Previous connection found' }
+                ]
+              });
+
+              console.log(`[SessionSocket] Face match found during visual update: ${bestMatch.connection.name?.value} (score: ${bestMatch.score})`);
+            } else {
+              // No match found - new person
+              SessionManager.updateFaceMatch(currentSessionId, {
+                matched: false,
+                connectionId: null,
+                name: null,
+                connectionData: null
+              });
+
+              // Emit new contact result to client
+              socket.emit('face_match_result', {
+                matched: false,
+                name: 'New Contact',
+                company: null,
+                profileImage: null,
+                insights: [
+                  { type: 'bullet', text: 'New person detected' },
+                  { type: 'bullet', text: 'No previous connection found' },
+                  { type: 'bullet', text: 'Professional networking context' },
+                  { type: 'bullet', text: 'Ready to save new connection' }
+                ]
+              });
+
+              console.log(`[SessionSocket] No face match found during visual update - new person`);
+            }
+          } catch (error) {
+            console.error('[SessionSocket] Error during face matching in visual update:', error);
+            // Don't fail the whole visual update if face matching fails
+            SessionManager.updateFaceMatch(currentSessionId, {
+              matched: false,
+              connectionId: null,
+              name: null,
+              connectionData: null
+            });
+          }
+        }
+
         // Emit visual update to client
         socket.emit('session:visual_update', {
           visual: {
@@ -311,26 +384,67 @@ export const registerSessionSocket = (io) => {
           }
         }
 
-        // Create draft connection in MongoDB
-        const draftConnection = await createDraftConnection(
-          audioData,
-          sessionSnapshot.visual,
-          sessionSnapshot.context,
-          sessionSnapshot.userId,
-          false // Not temporary
-        );
+        // Check if we have a face match from headshot generation
+        const faceMatch = sessionSnapshot.visual.faceMatch;
+        let finalConnection;
+        let actionType;
 
-        console.log(`[SessionSocket] Session ${currentSessionId} finalized, Connection ID: ${draftConnection._id}`);
+        if (faceMatch?.matched && faceMatch.connectionId) {
+          // UPDATE EXISTING CONNECTION
+          console.log(`[SessionSocket] Face match found: ${faceMatch.name} (Connection ID: ${faceMatch.connectionId})`);
+          
+          try {
+            finalConnection = await addInteractionToExistingConnection(
+              faceMatch.connectionId,
+              audioData,
+              sessionSnapshot.visual,
+              sessionSnapshot.context,
+              sessionSnapshot.userId
+            );
+
+            actionType = 'updated';
+            console.log(`[SessionSocket] Updated existing connection ${finalConnection._id} for session ${currentSessionId}`);
+          } catch (error) {
+            console.error(`[SessionSocket] Error updating existing connection ${faceMatch.connectionId}:`, error);
+            // Fallback to creating new connection if update fails
+            console.log(`[SessionSocket] Falling back to creating new connection`);
+            finalConnection = await createDraftConnection(
+              audioData,
+              sessionSnapshot.visual,
+              sessionSnapshot.context,
+              sessionSnapshot.userId,
+              false // Not temporary
+            );
+            actionType = 'created';
+          }
+        } else {
+          // CREATE NEW CONNECTION
+          console.log(`[SessionSocket] No face match found, creating new draft connection`);
+          
+          finalConnection = await createDraftConnection(
+            audioData,
+            sessionSnapshot.visual,
+            sessionSnapshot.context,
+            sessionSnapshot.userId,
+            false // Not temporary
+          );
+
+          actionType = 'created';
+          console.log(`[SessionSocket] Created new draft connection ${finalConnection._id} for session ${currentSessionId}`);
+        }
 
         // Emit finalized event with connection details
         socket.emit('session:finalized', {
-          connectionId: draftConnection._id.toString(),
+          connectionId: finalConnection._id.toString(),
           profile: {
-            name: draftConnection.name.value,
-            company: draftConnection.company.value,
-            status: draftConnection.status
+            name: finalConnection.name.value,
+            company: finalConnection.company.value,
+            status: finalConnection.status
           },
-          message: 'Session finalized and saved to database'
+          action: actionType, // 'updated' or 'created'
+          message: actionType === 'updated' 
+            ? `Session finalized and added to existing connection: ${finalConnection.name.value}`
+            : 'Session finalized and saved to database'
         });
 
         // Clean up socket reference
@@ -410,18 +524,54 @@ export const registerSessionSocket = (io) => {
             }
           }
 
-          await createDraftConnection(
-            audioData,
-            sessionSnapshot.visual,
-            sessionSnapshot.context,
-            sessionSnapshot.userId,
-            false
-          );
+          // Check if we have a face match from headshot generation
+          const faceMatch = sessionSnapshot.visual.faceMatch;
+          let finalConnection;
+          let actionType;
+
+          if (faceMatch?.matched && faceMatch.connectionId) {
+            // UPDATE EXISTING CONNECTION
+            console.log(`[SessionSocket] Stale session ${sessionId}: Face match found: ${faceMatch.name} (Connection ID: ${faceMatch.connectionId})`);
+            
+            try {
+              finalConnection = await addInteractionToExistingConnection(
+                faceMatch.connectionId,
+                audioData,
+                sessionSnapshot.visual,
+                sessionSnapshot.context,
+                sessionSnapshot.userId
+              );
+
+              actionType = 'updated';
+              console.log(`[SessionSocket] Auto-finalized stale session ${sessionId}: Updated existing connection ${finalConnection._id}`);
+            } catch (error) {
+              console.error(`[SessionSocket] Error updating existing connection for stale session ${sessionId}:`, error);
+              // Fallback to creating new connection if update fails
+              finalConnection = await createDraftConnection(
+                audioData,
+                sessionSnapshot.visual,
+                sessionSnapshot.context,
+                sessionSnapshot.userId,
+                false
+              );
+              actionType = 'created';
+            }
+          } else {
+            // CREATE NEW CONNECTION
+            finalConnection = await createDraftConnection(
+              audioData,
+              sessionSnapshot.visual,
+              sessionSnapshot.context,
+              sessionSnapshot.userId,
+              false
+            );
+
+            actionType = 'created';
+            console.log(`[SessionSocket] Auto-finalized stale session ${sessionId}: Created new draft connection ${finalConnection._id}`);
+          }
 
           // Clean up socket reference for stale session
           sessionSocketMap.delete(sessionId);
-
-          console.log(`[SessionSocket] Auto-finalized stale session ${sessionId}`);
         } catch (error) {
           console.error(`[SessionSocket] Error auto-finalizing stale session ${sessionId}:`, error);
         }
