@@ -1,3 +1,5 @@
+import { validateAudioData, normalizeProfileField, normalizeFollowUpHook } from './schemaValidator.js';
+
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 async function callOpenRouter(prompt) {
@@ -71,45 +73,30 @@ export async function parseTranscript(transcript) {
 
   const parsed = JSON.parse(jsonMatch[0]);
 
-  return validateAndNormalize(parsed);
+  // Validate with Zod schema (ensures alignment with MongoDB schema)
+  const validated = validateAudioData(parsed);
+
+  // Normalize to match MongoDB schema structure (adds 'source' field)
+  return normalizeForMongoDB(validated);
 }
 
-export function validateAndNormalize(parsed) {
-  const result = {
-    profile: {
-      name: normalizeField(parsed.profile?.name),
-      company: normalizeField(parsed.profile?.company),
-      role: normalizeField(parsed.profile?.role),
-    },
-    topics_discussed: Array.isArray(parsed.topics_discussed) ? parsed.topics_discussed : [],
-    their_challenges: Array.isArray(parsed.their_challenges) ? parsed.their_challenges : [],
-    follow_up_hooks: normalizeFollowUpHooks(parsed.follow_up_hooks),
-    personal_details: Array.isArray(parsed.personal_details) ? parsed.personal_details : [],
-    transcript_summary: parsed.transcript_summary || '',
-  };
-
-  return result;
-}
-
-function normalizeField(field) {
-  if (!field) {
-    return { value: null, confidence: 'low' };
-  }
+/**
+ * Normalizes validated audio data to match MongoDB Connection schema
+ * Adds 'source' field to profile fields
+ */
+function normalizeForMongoDB(validated) {
   return {
-    value: field.value || null,
-    confidence: ['high', 'medium', 'low'].includes(field.confidence) ? field.confidence : 'low',
+    profile: {
+      name: normalizeProfileField(validated.profile?.name, 'livekit'),
+      company: normalizeProfileField(validated.profile?.company, 'livekit'),
+      role: validated.profile?.role 
+        ? normalizeProfileField(validated.profile.role, 'livekit')
+        : { value: null, confidence: 'low', source: 'livekit' },
+    },
+    topics_discussed: validated.topics_discussed || [],
+    their_challenges: validated.their_challenges || [],
+    follow_up_hooks: (validated.follow_up_hooks || []).map(normalizeFollowUpHook),
+    personal_details: validated.personal_details || [],
+    transcript_summary: validated.transcript_summary || '',
   };
-}
-
-function normalizeFollowUpHooks(hooks) {
-  if (!Array.isArray(hooks)) {
-    return [];
-  }
-
-  const validTypes = ['resource_share', 'intro_request', 'meeting', 'other'];
-
-  return hooks.map(hook => ({
-    type: validTypes.includes(hook.type) ? hook.type : 'other',
-    detail: hook.detail || '',
-  }));
 }
