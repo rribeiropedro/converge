@@ -24,6 +24,7 @@ function App() {
   const socketRef = useRef(null);
   const audioStreamRef = useRef(null);
   const headshotRequestInFlightRef = useRef(false);
+  const headshotGeneratedRef = useRef(false);
 
   // Capture current frame from video element
   const captureVideoFrame = (videoElement) => {
@@ -257,16 +258,16 @@ function App() {
   // Send screenshots to Gemini API via server
   const sendScreenshotsToGemini = async (screenshots) => {
     // Don't send if we already have a generated headshot
-    if (generatedImage || headshotRequestInFlightRef.current) {
+    if (generatedImage || headshotGeneratedRef.current || headshotRequestInFlightRef.current) {
       console.log('Headshot already generated, skipping...');
       return;
     }
+    headshotGeneratedRef.current = true;
     headshotRequestInFlightRef.current = true;
     
-    // Stop camera immediately after collecting 2 screenshots
-    await stopCamera();
+    // Generate headshot in the background while streams continue
     setResults(prev => [...prev, {
-      text: '🛑 Camera stopped - Processing screenshots...',
+      text: '🧠 Generating headshot in background...',
       timestamp: new Date().toLocaleTimeString(),
       inferenceLatency: null,
       totalLatency: null
@@ -375,6 +376,11 @@ function App() {
 
   const handleStart = async () => {
     try {
+      // Reset per-session headshot state
+      headshotGeneratedRef.current = false;
+      headshotRequestInFlightRef.current = false;
+      setGeneratedImage(null);
+
       // Generate session ID
       const newSessionId = generateSessionId();
       setSessionId(newSessionId);
@@ -517,7 +523,8 @@ function App() {
             parsedResult.face_detected === true &&
             !generatedImage &&
             !isGenerating &&
-            !headshotRequestInFlightRef.current
+            !headshotRequestInFlightRef.current &&
+            !headshotGeneratedRef.current
           ) {
             const screenshotDataUrl = captureVideoFrame(videoRef.current);
             if (screenshotDataUrl) {
