@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import CameraRecorder from './CameraRecorder';
 import AuthPage from './AuthPage';
-import { isAuthenticated, logoutFromAPI } from './authUtils';
+import { isAuthenticated } from './authUtils';
 
 function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -70,4 +70,3 @@ function App() {
 }
 
 export default App;
-
