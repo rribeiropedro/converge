@@ -1,9 +1,6 @@
-import canvas from 'canvas';
 import fetch from 'node-fetch';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-const { Canvas, Image, ImageData, loadImage } = canvas;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +9,22 @@ const MODEL_URL = path.join(__dirname, '../../face-api-models');
 
 let faceapi = null;
 let modelsLoaded = false;
+let canvasModule = null;
+
+/**
+ * Lazy-load canvas to avoid native module errors at startup
+ */
+async function loadCanvas() {
+  if (canvasModule) return canvasModule;
+  
+  try {
+    canvasModule = await import('canvas');
+    return canvasModule.default;
+  } catch (error) {
+    console.error('Failed to load canvas module:', error);
+    throw new Error('Canvas module failed to load. Native dependencies may not be built. Error: ' + error.message);
+  }
+}
 
 /**
  * Lazy-load face-api to avoid TensorFlow initialization errors at startup
@@ -20,6 +33,10 @@ async function loadFaceAPI() {
   if (faceapi) return faceapi;
   
   try {
+    // Load canvas first
+    const canvas = await loadCanvas();
+    const { Canvas, Image, ImageData } = canvas;
+    
     // Dynamic import to avoid loading TensorFlow until actually needed
     faceapi = await import('@vladmandic/face-api');
     
@@ -59,6 +76,8 @@ export async function generateFaceEmbedding(imageData) {
   await loadModels();
   
   const api = await loadFaceAPI();
+  const canvas = await loadCanvas();
+  const { Image, loadImage } = canvas;
 
   let img;
   if (imageData.startsWith('data:image')) {
