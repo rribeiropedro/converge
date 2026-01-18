@@ -7,6 +7,7 @@ import connectDB from './config/database.js';
 import apiRoutes from './routes/index.js';
 import transcribeRoutes from './routes/transcribeRoutes.js';
 import { registerTranscribeLiveSocket } from './realtime/transcribeSocket.js';
+import { registerSessionSocket } from './realtime/sessionSocket.js';
 
 // Load environment variables
 dotenv.config();
@@ -16,19 +17,40 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
 
-// Connect to MongoDB (optional - comment out if not using MongoDB)
-// connectDB();
+// Connect to MongoDB (required for session finalization)
+connectDB();
+
+// CORS configuration
+const corsOptions = {
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  credentials: true
+};
 
 // Middleware
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3001',
-  credentials: true
-}));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const io = new Server(server, { cors: corsOptions });
 registerTranscribeLiveSocket(io);
+registerSessionSocket(io);
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Welcome to NexHacks API',
+    version: '1.0.0',
+    endpoints: {
+      api: '/api',
+      users: '/api/users',
+      transcribe: '/api/transcribe',
+      connections: '/api/connections',
+      overshoot: '/api/overshoot-result',
+      headshot: '/api/generate-headshot',
+      health: '/health'
+    }
+  });
+});
 
 // API Routes
 app.use('/api', apiRoutes);

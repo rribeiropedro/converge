@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { RealtimeVision } from '@overshoot/sdk';
+import { io } from 'socket.io-client';
 import './App.css';
 
 function App() {
@@ -8,9 +9,15 @@ function App() {
   const [screenshotBuffer, setScreenshotBuffer] = useState([]);
   const [generatedImage, setGeneratedImage] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [sessionStatus, setSessionStatus] = useState('idle'); // idle, ready, recording, finalized
   const visionRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const sessionSocketRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const audioProcessorRef = useRef(null);
+  const audioSourceRef = useRef(null);
 
   // Capture current frame from video element
   const captureVideoFrame = (videoElement) => {
@@ -136,11 +143,129 @@ function App() {
     }
   };
 
+  // Generate unique session ID
+  const generateSessionId = () => {
+    return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  };
+
+  // Setup audio streaming for transcription
+  const setupAudioStream = (stream) => {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      processor.onaudioprocess = (event) => {
+        if (sessionSocketRef.current && sessionSocketRef.current.connected) {
+          const input = event.inputBuffer.getChannelData(0);
+          // Convert float32 to int16 PCM
+          const pcm16 = new Int16Array(input.length);
+          for (let i = 0; i < input.length; i++) {
+            const sample = Math.max(-1, Math.min(1, input[i]));
+            pcm16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+          }
+          sessionSocketRef.current.emit('session:audio', pcm16.buffer);
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      audioContextRef.current = audioContext;
+      audioProcessorRef.current = processor;
+      audioSourceRef.current = source;
+    } catch (error) {
+      console.error('Error setting up audio stream:', error);
+    }
+  };
+
+  // Cleanup audio stream
+  const cleanupAudioStream = () => {
+    if (audioProcessorRef.current) audioProcessorRef.current.disconnect();
+    if (audioSourceRef.current) audioSourceRef.current.disconnect();
+    if (audioContextRef.current) audioContextRef.current.close();
+    audioProcessorRef.current = null;
+    audioSourceRef.current = null;
+    audioContextRef.current = null;
+  };
+
   const handleStart = async () => {
     try {
-      // Get camera stream for preview
+      // Generate session ID
+      const newSessionId = generateSessionId();
+      setSessionId(newSessionId);
+      setSessionStatus('ready');
+
+      // Connect to session WebSocket
+      const sessionSocket = io('http://localhost:3001/api/session', {
+        transports: ['websocket']
+      });
+      sessionSocketRef.current = sessionSocket;
+
+      // Setup session event listeners
+      sessionSocket.on('session:ready', () => {
+        setSessionStatus('recording');
+        setResults(prev => [...prev, {
+          text: '✅ Session initialized',
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      sessionSocket.on('session:visual_update', (data) => {
+        setResults(prev => [...prev, {
+          text: `📸 Visual intel locked: ${data.visual.appearance || 'Face detected'}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      sessionSocket.on('session:audio_update', (data) => {
+        if (data.transcript_chunk) {
+          setResults(prev => [...prev, {
+            text: `💬 ${data.transcript_chunk}`,
+            timestamp: new Date().toLocaleTimeString(),
+            inferenceLatency: null,
+            totalLatency: null
+          }]);
+        }
+      });
+
+      sessionSocket.on('session:finalized', (data) => {
+        setSessionStatus('finalized');
+        setResults(prev => [...prev, {
+          text: `✅ Session finalized! Connection ID: ${data.connectionId}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      sessionSocket.on('session:error', (error) => {
+        setResults(prev => [...prev, {
+          text: `❌ Session error: ${error.message}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      // Start session with context
+      sessionSocket.emit('session:start', {
+        sessionId: newSessionId,
+        userId: 'test-user-id', // TODO: Get from auth context
+        context: {
+          event: { name: 'NexHacks 2026', type: 'hackathon' },
+          location: { name: 'Test Location', city: 'San Francisco' }
+        }
+      });
+
+      // Get camera and microphone stream
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+        video: { facingMode: 'environment' },
+        audio: true
       });
       
       // Show video preview
@@ -149,6 +274,9 @@ function App() {
         videoRef.current.play();
       }
       streamRef.current = stream;
+
+      // Setup audio streaming for transcription
+      setupAudioStream(stream);
 
       // Initialize Overshoot SDK
       const vision = new RealtimeVision({
@@ -185,16 +313,10 @@ function App() {
             sampling_ratio: 0.1
           },
         onResult: (result) => {
-          // Send result to server for terminal logging
-          fetch('/api/overshoot-result', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(result)
-          }).catch(err => {
-            console.warn('Failed to send result to server:', err);
-          });
+          // Send visual data to session WebSocket
+          if (sessionSocketRef.current && sessionSocketRef.current.connected) {
+            sessionSocketRef.current.emit('session:visual', result);
+          }
           
           // Parse the result - it should match the outputSchema structure
           const parsedResult = typeof result.result === 'string' 
@@ -255,11 +377,25 @@ function App() {
 
   const handleStop = async () => {
     try {
+      // End session
+      if (sessionSocketRef.current && sessionSocketRef.current.connected) {
+        sessionSocketRef.current.emit('session:end');
+        setResults(prev => [...prev, {
+          text: '🛑 Ending session and finalizing...',
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      }
+
       // Stop Overshoot SDK
       if (visionRef.current) {
         await visionRef.current.stop();
         visionRef.current = null;
       }
+      
+      // Cleanup audio stream
+      cleanupAudioStream();
       
       // Stop camera stream
       if (streamRef.current) {
@@ -272,7 +408,15 @@ function App() {
         videoRef.current.srcObject = null;
       }
       
+      // Disconnect session socket
+      if (sessionSocketRef.current) {
+        sessionSocketRef.current.disconnect();
+        sessionSocketRef.current = null;
+      }
+      
       setIsRunning(false);
+      setSessionId(null);
+      setSessionStatus('idle');
     } catch (error) {
       console.error('Error stopping vision:', error);
     }
@@ -289,6 +433,10 @@ function App() {
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      cleanupAudioStream();
+      if (sessionSocketRef.current) {
+        sessionSocketRef.current.disconnect();
       }
     };
   }, []);
@@ -317,12 +465,17 @@ function App() {
         <div className="controls">
           {!isRunning ? (
             <button onClick={handleStart} className="btn btn-start">
-              Start Camera
+              Start Recording Session
             </button>
           ) : (
             <button onClick={handleStop} className="btn btn-stop">
-              Stop Camera
+              End Session
             </button>
+          )}
+          {sessionStatus !== 'idle' && (
+            <div className="session-status">
+              Session: {sessionStatus} {sessionId ? `(${sessionId.substring(0, 8)}...)` : ''}
+            </div>
           )}
         </div>
         <div className="prompt-control">
