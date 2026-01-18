@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import connectDB from './config/database.js';
 import apiRoutes from './routes/index.js';
+import transcribeRoutes from './routes/transcribeRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +25,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // API Routes
 app.use('/api', apiRoutes);
+app.use('/api/transcribe', transcribeRoutes);
 
 // Health check route
 app.get('/health', (req, res) => {
