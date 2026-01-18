@@ -47,6 +47,7 @@ function CameraRecorder() {
   const headshotRequestInFlightRef = useRef(false);
   const headshotGeneratedRef = useRef(false);
   const currentSessionIdRef = useRef(null); // Keep track of current session ID for headshot generation
+  const sessionStartTimeRef = useRef(null); // Track session start time for visual event timestamps
 
   const handleLogout = async () => {
     await logoutFromAPI();
@@ -268,10 +269,11 @@ function CameraRecorder() {
       const newSessionId = generateSessionId();
       setSessionId(newSessionId);
       currentSessionIdRef.current = newSessionId; // Store in ref for headshot generation
+      sessionStartTimeRef.current = Date.now(); // Record session start time for correlation
       setSessionStatus('ready');
 
       // Connect to session WebSocket - use dynamic hostname for mobile network access
-      const sessionSocket = io(`${window.location.protocol}//${window.location.hostname}:3001/api/session`, {
+      const sessionSocket = io(`${window.location.protocol}//${window.location.hostname}:5000/api/session`, {
         transports: ['websocket']
       });
       sessionSocketRef.current = sessionSocket;
@@ -446,15 +448,20 @@ function CameraRecorder() {
         apiKey: (process.env.REACT_APP_OVERSHOOT_API_KEY || 'your-api-key').replace(/^["']|["']$/g, ''),
         prompt: `Analyze the current frame.
            1. First, determine if a human face is clearly visible. Set "face_detected" to true or false.
-           2. If true, generate a compact "appearance_profile" merging clothing, style, and facial features (e.g., "Silver blazer, graphic tee, scar on left eyebrow, square glasses").
-           3. If true, briefly describe the "environment_context" (e.g., "Noisy VIP lounge").
-           4. If false, leave the profile and context as empty strings.`,
+           2. If true, determine if the person's mouth is visibly moving/open as if speaking. Set "is_speaking" to true or false.
+           3. If true, generate a compact "appearance_profile" merging clothing, style, and facial features (e.g., "Silver blazer, graphic tee, scar on left eyebrow, square glasses").
+           4. If true, briefly describe the "environment_context" (e.g., "Noisy VIP lounge").
+           5. If false, set is_speaking to false and leave the profile and context as empty strings.`,
         outputSchema: {
             type: "object",
             properties: {
               face_detected: {
                 type: "boolean",
                 description: "True if a human face is clearly visible in the frame, otherwise false."
+              },
+              is_speaking: {
+                type: "boolean",
+                description: "True if the person's mouth is visibly moving/open as if speaking, otherwise false."
               },
               appearance_profile: { 
                 type: "string", 
@@ -465,7 +472,7 @@ function CameraRecorder() {
                 description: "Brief context of the surroundings. Empty if no face detected." 
               }
             },
-            required: ["face_detected", "appearance_profile", "environment_context"]
+            required: ["face_detected", "is_speaking", "appearance_profile", "environment_context"]
           },
         source: { type: 'camera', cameraFacing: 'environment' },
         processing: {
@@ -475,9 +482,15 @@ function CameraRecorder() {
             sampling_ratio: 0.1
           },
         onResult: (result) => {
-          // Send visual data to session WebSocket
+          // Send visual data to session WebSocket with timestamp for speaker correlation
           if (sessionSocketRef.current && sessionSocketRef.current.connected) {
-            sessionSocketRef.current.emit('session:visual', result);
+            const captureTime = sessionStartTimeRef.current 
+              ? (Date.now() - sessionStartTimeRef.current) / 1000 
+              : null;
+            sessionSocketRef.current.emit('session:visual', {
+              ...result,
+              captureTime
+            });
           }
           
           // Parse the result - it should match the outputSchema structure
@@ -585,6 +598,7 @@ function CameraRecorder() {
       
       // Clear session ID ref
       currentSessionIdRef.current = null;
+      sessionStartTimeRef.current = null;
       
       setIsRunning(false);
       setSessionId(null);
