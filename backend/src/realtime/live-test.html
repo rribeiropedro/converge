@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Converge Live Transcription Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 24px;
+        line-height: 1.5;
+      }
+      button {
+        padding: 10px 16px;
+        margin-right: 8px;
+      }
+      #status {
+        margin: 12px 0;
+        font-weight: bold;
+      }
+      #log {
+        border: 1px solid #ccc;
+        padding: 12px;
+        height: 280px;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: #fafafa;
+      }
+      .warning {
+        color: #b45309;
+      }
+    </style>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  </head>
+  <body>
+    <h1>Live Transcription Test</h1>
+    <p class="warning">
+      Note: microphone access may be blocked from file:// URLs. If it fails,
+      serve this file with a local HTTP server.
+    </p>
+    <div>
+      <button id="start">Start</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <div id="status">Idle</div>
+    <div id="log"></div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const logEl = document.getElementById('log');
+      const startBtn = document.getElementById('start');
+      const stopBtn = document.getElementById('stop');
+
+      let socket = null;
+      let audioContext = null;
+      let processor = null;
+      let source = null;
+      let mediaStream = null;
+
+      const appendLog = (text) => {
+        logEl.textContent += `${text}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      const setStatus = (text) => {
+        statusEl.textContent = text;
+      };
+
+      const floatTo16BitPCM = (input) => {
+        const buffer = new ArrayBuffer(input.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < input.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, input[i]));
+          view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        }
+        return buffer;
+      };
+
+      const startStreaming = async () => {
+        setStatus('Requesting microphone...');
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        source = audioContext.createMediaStreamSource(mediaStream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (event) => {
+          const input = event.inputBuffer.getChannelData(0);
+          const pcm16 = floatTo16BitPCM(input);
+          if (socket && socket.connected) {
+            socket.emit('audio', pcm16);
+          }
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+      };
+
+      const stopStreaming = async () => {
+        if (processor) processor.disconnect();
+        if (source) source.disconnect();
+        if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
+        if (audioContext) await audioContext.close();
+
+        processor = null;
+        source = null;
+        mediaStream = null;
+        audioContext = null;
+      };
+
+      startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        logEl.textContent = '';
+
+        socket = io('http://localhost:5000/api/transcribe/live', {
+          transports: ['websocket'],
+        });
+
+        socket.on('connect', async () => {
+          setStatus('Connected, starting audio...');
+          socket.emit('start', {
+            encoding: 'linear16',
+            sample_rate: audioContext ? audioContext.sampleRate : 48000,
+            channels: 1,
+            language: 'en',
+            diarize: true,
+            smart_format: true,
+          });
+          await startStreaming();
+        });
+
+        socket.on('ready', () => {
+          setStatus('Streaming...');
+        });
+
+        socket.on('transcript', (payload) => {
+          if (!payload?.transcript) return;
+          const speaker = payload.speaker !== undefined ? `Speaker ${payload.speaker}` : 'Speaker';
+          appendLog(`[${speaker}] ${payload.transcript}`);
+        });
+
+        socket.on('error', (payload) => {
+          setStatus('Error');
+          appendLog(`Error: ${payload?.message || 'unknown'}`);
+          console.error(payload);
+        });
+
+        socket.on('closed', () => {
+          setStatus('Closed');
+        });
+      });
+
+      stopBtn.addEventListener('click', async () => {
+        stopBtn.disabled = true;
+        startBtn.disabled = false;
+        await stopStreaming();
+        if (socket) {
+          socket.emit('stop');
+          socket.disconnect();
+          socket = null;
+        }
+        setStatus('Stopped');
+      });
+    </script>
+  </body>
+</html>
+
