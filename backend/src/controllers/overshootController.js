@@ -294,6 +294,16 @@ export const generateHeadshot = async (req, res) => {
     
     // If we have an image, store it in session and perform face matching
     if (extractedImageUrl) {
+      // DEBUG: Log the exact URL format to understand what we're getting
+      console.log(`\n🔍 HEADSHOT URL DEBUG:`);
+      console.log(`  URL length: ${extractedImageUrl.length}`);
+      console.log(`  URL prefix (first 50 chars): "${extractedImageUrl.substring(0, 50)}"`);
+      console.log(`  Starts with 'http': ${extractedImageUrl.startsWith('http')}`);
+      console.log(`  Starts with 'https': ${extractedImageUrl.startsWith('https')}`);
+      console.log(`  Starts with 'data:': ${extractedImageUrl.startsWith('data:')}`);
+      console.log(`  Starts with 'data:image': ${extractedImageUrl.startsWith('data:image')}`);
+      console.log(`  Contains 'base64': ${extractedImageUrl.includes('base64')}`);
+
       logger.logHeadshotGeneration(sessionId, 'success', {
         imageUrl: extractedImageUrl
       });
@@ -314,10 +324,49 @@ export const generateHeadshot = async (req, res) => {
       }
 
       try {
+        // Determine the correct storage format for the URL
+        // Handle various formats: http(s)://, data:image/..., raw base64, etc.
+        let headshotUrl = null;
+        let headshotBase64 = null;
+
+        if (extractedImageUrl.startsWith('http://') || extractedImageUrl.startsWith('https://')) {
+          // Standard HTTP/HTTPS URL
+          headshotUrl = extractedImageUrl;
+          console.log(`  ✓ Storing as URL (http/https)`);
+        } else if (extractedImageUrl.startsWith('data:image')) {
+          // Data URL with image MIME type
+          headshotBase64 = extractedImageUrl;
+          console.log(`  ✓ Storing as base64 (data:image)`);
+        } else if (extractedImageUrl.startsWith('data:')) {
+          // Data URL with other MIME type - convert to image format
+          headshotBase64 = extractedImageUrl;
+          console.log(`  ✓ Storing as base64 (data:)`);
+        } else if (extractedImageUrl.includes('base64')) {
+          // Contains base64 but doesn't start with data: - add prefix
+          headshotBase64 = extractedImageUrl.startsWith('base64,')
+            ? `data:image/png;${extractedImageUrl}`
+            : `data:image/png;base64,${extractedImageUrl}`;
+          console.log(`  ✓ Storing as base64 (added prefix)`);
+        } else if (extractedImageUrl.startsWith('//')) {
+          // Protocol-relative URL - add https:
+          headshotUrl = 'https:' + extractedImageUrl;
+          console.log(`  ✓ Storing as URL (protocol-relative -> https)`);
+        } else if (extractedImageUrl.length > 100 && !extractedImageUrl.includes(' ')) {
+          // Long string without spaces - likely raw base64
+          headshotBase64 = `data:image/png;base64,${extractedImageUrl}`;
+          console.log(`  ✓ Storing as base64 (assumed raw base64)`);
+        } else {
+          // Unknown format - try to store as URL
+          headshotUrl = extractedImageUrl;
+          console.log(`  ⚠️ Unknown format, storing as URL`);
+        }
+
+        console.log(`  Final storage: url=${headshotUrl ? 'SET' : 'null'}, base64=${headshotBase64 ? 'SET (' + headshotBase64.length + ' chars)' : 'null'}`);
+
         SessionManager.updateVisual(sessionId, {
           headshot: {
-            url: extractedImageUrl.startsWith('http') ? extractedImageUrl : null,
-            base64: extractedImageUrl.startsWith('data:image') ? extractedImageUrl : null
+            url: headshotUrl,
+            base64: headshotBase64
           }
         });
         // Mark headshot as complete ONLY if update succeeded
