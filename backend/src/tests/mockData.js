@@ -21,7 +21,7 @@ export const mockTranscript = `
 `;
 
 export const mockVisualData = {
-  face_embedding: new Array(512).fill(0).map(() => Math.random() * 2 - 1),
+  face_embedding: new Array(128).fill(0).map(() => Math.random() * 2 - 1),
   raw_appearance: "Woman in mid-30s, black blazer over white blouse, silver necklace, short dark hair",
   raw_environment: "Conference booth area, NexHacks banner visible, coffee station nearby, standing near demo table",
   headshot: {

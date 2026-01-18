@@ -11,7 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@deepgram/sdk": "^3.6.1",
-    "@tensorflow/tfjs-node": "^4.15.0",
+    "@tensorflow/tfjs-node": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "canvas": "^3.2.1",
     "cors": "^2.8.5",

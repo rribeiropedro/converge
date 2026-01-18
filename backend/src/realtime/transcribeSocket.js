@@ -35,7 +35,10 @@ const toBuffer = (chunk) => {
 export const registerTranscribeLiveSocket = (io) => {
   const namespace = io.of(LIVE_NAMESPACE);
 
+  console.log(`🔌 WebSocket namespace registered: ${LIVE_NAMESPACE}`);
+
   namespace.on('connection', (socket) => {
+    console.log(`✅ Client connected to live transcription: ${socket.id}`);
     let connection = null;
 
     const closeConnection = () => {
@@ -54,16 +57,23 @@ export const registerTranscribeLiveSocket = (io) => {
     };
 
     const startConnection = (options = {}) => {
-      if (connection) return;
+      if (connection) {
+        console.log(`⚠️  Connection already exists for ${socket.id}`);
+        return;
+      }
+
+      console.log(`🎤 Starting Deepgram connection for ${socket.id} with options:`, pickLiveOptions(options));
 
       try {
         connection = createLiveTranscriptionConnection(pickLiveOptions(options));
       } catch (error) {
+        console.error(`❌ Error creating Deepgram connection for ${socket.id}:`, error);
         socket.emit('error', { message: error.message });
         return;
       }
 
       connection.on(LiveTranscriptionEvents.Open, () => {
+        console.log(`✅ Deepgram connection opened for ${socket.id}`);
         socket.emit('ready');
       });
 
@@ -77,6 +87,8 @@ export const registerTranscribeLiveSocket = (io) => {
         const speaker = speakers.size > 1 ? `${words[0]?.speaker}+` : words[0]?.speaker;
 
         if (!transcript) return;
+
+        console.log(`📝 Transcript (${data.is_final ? 'final' : 'interim'}) for ${socket.id}:`, transcript.substring(0, 50));
 
         socket.emit('transcript', {
           transcript,
@@ -95,6 +107,7 @@ export const registerTranscribeLiveSocket = (io) => {
       });
 
       connection.on(LiveTranscriptionEvents.Error, (error) => {
+        console.error(`❌ Deepgram error for ${socket.id}:`, error);
         socket.emit('error', {
           message: error?.message || 'Deepgram error',
           details: error,
@@ -102,28 +115,47 @@ export const registerTranscribeLiveSocket = (io) => {
       });
 
       connection.on(LiveTranscriptionEvents.Close, () => {
+        console.log(`🔌 Deepgram connection closed for ${socket.id}`);
         socket.emit('closed');
         closeConnection();
       });
     };
 
     socket.on('start', (options) => {
+      console.log(`▶️  Start event received from ${socket.id}`);
       startConnection(options);
     });
 
     socket.on('audio', (chunk) => {
-      if (!connection) startConnection();
+      if (!connection) {
+        console.log(`🎤 Audio received without connection, starting connection for ${socket.id}`);
+        startConnection();
+      }
       const buffer = toBuffer(chunk);
-      if (!buffer || !connection) return;
+      if (!buffer) {
+        console.warn(`⚠️  Invalid audio chunk received from ${socket.id}`);
+        return;
+      }
+      if (!connection) {
+        console.warn(`⚠️  No connection available for ${socket.id}`);
+        return;
+      }
+      // Log first audio chunk only to avoid spam
+      if (!socket._firstAudioLogged) {
+        console.log(`🎵 First audio chunk received from ${socket.id}, size: ${buffer.length} bytes`);
+        socket._firstAudioLogged = true;
+      }
       connection.send(buffer);
     });
 
     socket.on('stop', () => {
+      console.log(`⏹️  Stop event received from ${socket.id}`);
       closeConnection();
       socket.emit('closed');
     });
 
     socket.on('disconnect', () => {
+      console.log(`❌ Client disconnected: ${socket.id}`);
       closeConnection();
     });
   });

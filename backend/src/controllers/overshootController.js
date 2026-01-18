@@ -98,7 +98,7 @@ export const generateHeadshot = async (req, res) => {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey.trim()}`,
-          'HTTP-Referer': process.env.CLIENT_URL || 'http://localhost:3000',
+          'HTTP-Referer': process.env.MOBILE_CLIENT_URL || 'http://localhost:3002',
           'X-Title': 'Converge Vision App'
         },
         body: JSON.stringify(requestBody)

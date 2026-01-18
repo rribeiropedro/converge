@@ -1,32 +1,66 @@
+/* Notion Dark Mode Design System */
+:root {
+  --background: #2F3438;
+  --foreground: rgba(255, 255, 255, 0.9);
+  --card: #373C3F;
+  --card-foreground: rgba(255, 255, 255, 0.9);
+  --primary: #529CCA;
+  --primary-foreground: #FFFFFF;
+  --muted: #3F4448;
+  --muted-foreground: #979A9B;
+  --border: rgba(255, 255, 255, 0.08);
+  --hover: #3F4448;
+  --notion-green: #4DAB9A;
+  --notion-green-bg: #354C4B;
+  --notion-red: #FF7369;
+  --notion-red-bg: #594141;
+  --radius: 0.375rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--background);
+  color: var(--foreground);
+}
+
 .App {
-  text-align: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  background: var(--background);
 }
 
 .App-header {
-  max-width: 800px;
+  max-width: 720px;
   margin: 0 auto;
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  padding: 0;
 }
 
 h1 {
-  color: #333;
-  margin-bottom: 30px;
+  color: var(--foreground);
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0;
+  padding: 0 1rem;
+  height: 45px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
 }
 
 .camera-preview {
   width: 100%;
-  max-width: 640px;
-  margin: 20px auto;
+  margin: 1.5rem 0;
   background: #000;
-  border-radius: 8px;
+  border-radius: var(--radius);
   overflow: hidden;
   position: relative;
+  border: 1px solid var(--border);
 }
 
 .video-preview {
@@ -36,139 +70,177 @@ h1 {
 }
 
 .video-placeholder {
-  padding: 60px 20px;
-  color: #999;
+  padding: 4rem 1.25rem;
+  color: var(--muted-foreground);
   text-align: center;
-  font-style: italic;
+  font-size: 0.875rem;
 }
 
 .controls {
-  margin: 20px 0;
+  margin: 1.5rem 0;
+  text-align: center;
 }
 
 .btn {
-  padding: 12px 24px;
-  font-size: 16px;
-  border: none;
-  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   cursor: pointer;
-  font-weight: 600;
-  transition: all 0.3s ease;
+  font-weight: 500;
+  transition: background-color 75ms ease, transform 75ms ease;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .btn-start {
-  background: #4CAF50;
-  color: white;
+  background: var(--notion-green-bg);
+  color: var(--notion-green);
+  border-color: var(--notion-green-bg);
 }
 
 .btn-start:hover {
-  background: #45a049;
-  transform: translateY(-2px);
+  background: #3d5a58;
 }
 
 .btn-stop {
-  background: #f44336;
-  color: white;
+  background: var(--notion-red-bg);
+  color: var(--notion-red);
+  border-color: var(--notion-red-bg);
 }
 
 .btn-stop:hover {
-  background: #da190b;
-  transform: translateY(-2px);
+  background: #654646;
+}
+
+.btn:active {
+  transform: scale(0.98);
 }
 
 .prompt-control {
-  margin: 20px 0;
+  margin: 1.5rem 0;
+  padding: 0 1rem;
 }
 
 .prompt-control input {
   width: 100%;
-  max-width: 400px;
-  padding: 10px;
-  font-size: 14px;
-  border: 2px solid #ddd;
-  border-radius: 6px;
-  margin-top: 10px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  transition: border-color 75ms ease, box-shadow 75ms ease;
+}
+
+.prompt-control input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.prompt-control input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .prompt-control input:disabled {
-  background: #f5f5f5;
+  background: var(--muted);
   cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .results {
-  margin-top: 30px;
+  margin-top: 2rem;
+  padding: 0 1rem 2rem;
   text-align: left;
 }
 
 .results h2 {
-  color: #333;
-  margin-bottom: 15px;
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.875rem;
 }
 
 .no-results {
-  color: #999;
-  font-style: italic;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
 }
 
 .results-list {
   max-height: 400px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .result-item {
-  background: #f9f9f9;
-  border-left: 4px solid #667eea;
-  padding: 15px;
-  margin-bottom: 10px;
-  border-radius: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  transition: background-color 75ms ease;
+}
+
+.result-item:hover {
+  background: var(--hover);
 }
 
 .result-text {
-  font-size: 16px;
-  color: #333;
-  margin-bottom: 8px;
-  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--foreground);
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
 }
 
 .result-meta {
   display: flex;
-  gap: 15px;
-  font-size: 12px;
-  color: #666;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  flex-wrap: wrap;
 }
 
 .result-meta span {
-  background: #e0e0e0;
-  padding: 4px 8px;
-  border-radius: 4px;
+  background: var(--muted);
+  padding: 0.125rem 0.375rem;
+  border-radius: calc(var(--radius) - 2px);
 }
 
 .generated-headshot {
-  margin-top: 30px;
+  margin-top: 2rem;
+  padding: 0 1rem;
   text-align: left;
 }
 
 .generated-headshot h2 {
-  color: #333;
-  margin-bottom: 15px;
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.875rem;
 }
 
 .generating-state {
   text-align: center;
-  padding: 40px 20px;
-  background: #f9f9f9;
-  border-radius: 8px;
-  border: 2px dashed #667eea;
+  padding: 2.5rem 1.25rem;
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
 }
 
 .spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #667eea;
+  border: 3px solid var(--muted);
+  border-top: 3px solid var(--primary);
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   animation: spin 1s linear infinite;
-  margin: 0 auto 15px;
+  margin: 0 auto 1rem;
 }
 
 @keyframes spin {
@@ -177,54 +249,89 @@ h1 {
 }
 
 .generating-state p {
-  color: #666;
-  margin: 5px 0;
+  color: var(--foreground);
+  margin: 0.375rem 0;
+  font-size: 0.875rem;
 }
 
 .buffer-info {
-  font-size: 14px;
-  color: #999;
-  font-style: italic;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
 }
 
 .headshot-image-container {
-  background: #f9f9f9;
-  border-radius: 8px;
-  padding: 20px;
+  background: var(--card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  padding: 1.25rem;
   text-align: center;
 }
 
 .headshot-image {
   max-width: 100%;
   max-height: 500px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  margin-bottom: 15px;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  margin-bottom: 1rem;
 }
 
 .btn-download {
-  background: #667eea;
-  color: white;
-  margin-top: 10px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+  margin-top: 0.5rem;
 }
 
 .btn-download:hover {
-  background: #5568d3;
-  transform: translateY(-2px);
+  background: #4a8bb5;
 }
 
 .buffer-indicator {
-  margin-top: 20px;
-  padding: 10px 15px;
-  background: #e3f2fd;
-  border-left: 4px solid #2196F3;
-  border-radius: 4px;
-  text-align: left;
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(82, 156, 202, 0.1);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  text-align: center;
 }
 
 .buffer-indicator p {
-  color: #1976D2;
+  color: var(--primary);
   font-weight: 500;
   margin: 0;
+  font-size: 0.875rem;
+}
+
+/* Notion-style scrollbar */
+.results-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.results-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.results-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.results-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Content wrapper */
+.content-section {
+  padding: 0 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  margin-bottom: 0.75rem;
 }
 
