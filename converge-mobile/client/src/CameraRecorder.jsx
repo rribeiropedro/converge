@@ -19,21 +19,11 @@ function CameraRecorder() {
   const [showInsightsOverlay, setShowInsightsOverlay] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
   
-  // Insights overlay data - supports bullet points
-  // Updated dynamically when face_match_result is received from backend
+  // Insights overlay data - populated solely from socket events (face_match_result)
   const [insightsData, setInsightsData] = useState({
     items: []
   });
   const visionRef = useRef(null);
-
-  // Helper function to update insights data dynamically
-  // Example: updateInsights({ items: [...] })
-  const updateInsights = (newData) => {
-    setInsightsData(prev => ({
-      ...prev,
-      ...newData
-    }));
-  };
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const sessionSocketRef = useRef(null);
@@ -257,13 +247,17 @@ function CameraRecorder() {
       headshotRequestInFlightRef.current = false;
       setGeneratedImage(null);
 
+      console.log('🚀 Starting recording session...');
+
       // Generate session ID
       const newSessionId = generateSessionId();
       setSessionId(newSessionId);
       currentSessionIdRef.current = newSessionId; // Store in ref for headshot generation
       setSessionStatus('ready');
+      console.log('✅ Session ID generated:', newSessionId);
 
       // Connect to session WebSocket
+      console.log('🔌 Connecting to session WebSocket...');
       const sessionSocket = io('http://localhost:3001/api/session', {
         transports: ['websocket']
       });
@@ -306,15 +300,50 @@ function CameraRecorder() {
             totalLatency: null
           }]);
         }
+        
+        // Update overlay with audio insights
+        if (data.insights && data.insights.length > 0) {
+          setInsightsData(prev => {
+            // Merge new insights with existing, avoiding duplicates
+            const existingTexts = new Set(prev.items.map(item => item.text));
+            const newInsights = data.insights.filter(insight => !existingTexts.has(insight.text));
+            
+            return {
+              items: [...prev.items, ...newInsights]
+            };
+          });
+          
+          // Show overlay if not already visible
+          setShowInsightsOverlay(true);
+        }
       });
 
-      // Listen for face match results
+      // Listen for face match results (merge with existing audio insights)
       sessionSocket.on('face_match_result', (data) => {
         console.log('🎯 Face match result received:', data);
         
-        // Update insights overlay with received data
+        // MERGE face match insights with existing audio insights
         if (data && data.insights) {
-          setInsightsData({ items: data.insights });
+          setInsightsData(prev => {
+            // Remove any audio-generated insights that are now superseded by face match
+            // (e.g., "Name mentioned:" gets replaced by actual "Name:" from face match)
+            const filteredExisting = prev.items.filter(item => {
+              // Keep challenges, topics, and personal details
+              if (item.text.startsWith('Topic:') || 
+                  item.text.startsWith('Challenge:') || 
+                  (!item.text.startsWith('Name') && !item.text.startsWith('Company') && !item.text.startsWith('Role'))) {
+                return true;
+              }
+              return false;
+            });
+            
+            // Add face match insights at the TOP (most important)
+            return {
+              items: [...data.insights, ...filteredExisting]
+            };
+          });
+          
+          // Update profile image
           setProfileImage(data.profileImage || null);
           setShowInsightsOverlay(true);
         }
@@ -366,6 +395,7 @@ function CameraRecorder() {
       });
 
       // Get camera and microphone stream
+      console.log('📷 Requesting camera and microphone permissions...');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
         audio: {
@@ -375,6 +405,7 @@ function CameraRecorder() {
           noiseSuppression: true
         }
       });
+      console.log('✅ Camera and microphone access granted');
       
       // Show video preview
       if (videoRef.current) {
@@ -384,12 +415,19 @@ function CameraRecorder() {
       streamRef.current = stream;
 
       // Start audio recording via session socket (single socket for everything)
+      console.log('🎤 Starting audio recording...');
       await startAudioRecording(stream);
 
       // Initialize Overshoot SDK
+      console.log('👁️ Initializing Overshoot Vision SDK...');
+      const overshootApiKey = process.env.REACT_APP_OVERSHOOT_API_KEY || 'your-api-key';
+      if (!process.env.REACT_APP_OVERSHOOT_API_KEY) {
+        console.warn('⚠️ REACT_APP_OVERSHOOT_API_KEY not found in environment variables');
+      }
+      
       const vision = new RealtimeVision({
         apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
-        apiKey: (process.env.REACT_APP_OVERSHOOT_API_KEY || 'your-api-key').replace(/^["']|["']$/g, ''),
+        apiKey: overshootApiKey.replace(/^["']|["']$/g, ''),
         prompt: `Analyze the current frame.
            1. First, determine if a human face is clearly visible. Set "face_detected" to true or false.
            2. If true, generate a compact "appearance_profile" merging clothing, style, and facial features (e.g., "Silver blazer, graphic tee, scar on left eyebrow, square glasses").
@@ -483,10 +521,34 @@ function CameraRecorder() {
 
       visionRef.current = vision;
       await vision.start();
+      console.log('✅ Overshoot Vision SDK started successfully');
+      console.log('🎥 Recording session active!');
     } catch (error) {
-      console.error('Error starting vision:', error);
+      console.error('❌ Error starting recording session:', error);
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+      
       setIsRunning(false); // Reset on error
-      alert('Failed to start camera. Please check your API key and permissions.');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to start recording session.\n\n';
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage += 'Camera/microphone permissions were denied. Please allow access and try again.';
+      } else if (error.name === 'NotFoundError') {
+        errorMessage += 'No camera or microphone found on your device.';
+      } else if (error.message && error.message.includes('API')) {
+        errorMessage += 'Overshoot API key may be missing or invalid. Check your .env file.';
+      } else if (error.message && error.message.includes('socket')) {
+        errorMessage += 'Could not connect to the server. Make sure the backend is running on http://localhost:3001';
+      } else {
+        errorMessage += `Error: ${error.message}`;
+      }
+      
+      alert(errorMessage);
     }
   };
 
