@@ -270,8 +270,8 @@ function CameraRecorder() {
       currentSessionIdRef.current = newSessionId; // Store in ref for headshot generation
       setSessionStatus('ready');
 
-      // Connect to session WebSocket
-      const sessionSocket = io('http://localhost:3001/api/session', {
+      // Connect to session WebSocket - use dynamic hostname for mobile network access
+      const sessionSocket = io(`${window.location.protocol}//${window.location.hostname}:3001/api/session`, {
         transports: ['websocket']
       });
       sessionSocketRef.current = sessionSocket;

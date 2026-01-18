@@ -21,27 +21,27 @@ const PORT = process.env.PORT || 3001;
 // Connect to MongoDB (required for session finalization)
 connectDB();
 
-// CORS configuration
-const allowedOrigins = process.env.CLIENT_URL 
-  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
-  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:3001'];
-
+// CORS configuration - allow dynamic origins for mobile network access
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
+    // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
     
-    // In development, allow common localhost origins
-    if (process.env.NODE_ENV === 'development') {
-      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-        return callback(null, true);
-      }
-    }
+    // Allow localhost and any IP-based origin (local network)
+    const allowedPatterns = [
+      /^https?:\/\/localhost(:\d+)?$/,
+      /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+      /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/,  // Common LAN range
+      /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,   // Private network
+      /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/ // Private network
+    ];
     
-    // Check against allowed origins
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedPatterns.some(pattern => pattern.test(origin))) {
+      callback(null, true);
+    } else if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) {
       callback(null, true);
     } else {
+      console.warn(`CORS blocked origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -102,9 +102,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+// Start server on all interfaces (0.0.0.0) for mobile network access
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`📱 Mobile access: http://<your-lan-ip>:${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

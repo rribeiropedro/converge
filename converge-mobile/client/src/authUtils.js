@@ -1,6 +1,18 @@
 // Authentication utilities for mobile app
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// Get API URL dynamically based on current hostname
+// This allows the app to work when accessed from mobile devices via LAN IP
+const getApiUrl = () => {
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+  // Use the same hostname the browser is on, but port 3001
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+  return `${protocol}//${hostname}:3001`;
+};
+
+const API_URL = getApiUrl();
 
 // Get the stored token
 export const getToken = () => {
