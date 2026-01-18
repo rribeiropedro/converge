@@ -295,8 +295,13 @@ class LiveInsightEngine {
   extractValue(sentence, patterns) {
     if (!sentence) return null;
     for (const pattern of patterns) {
-      const match = sentence.match(new RegExp(pattern, 'i'));
-      if (match && match[1]) return match[1].trim();
+      try {
+        const match = sentence.match(new RegExp(pattern, 'i'));
+        if (match && match[1]) return match[1].trim();
+      } catch (e) {
+        console.error(`[LiveInsightEngine] Error extracting value from sentence: ${sentence} with pattern: ${pattern}`, e.message);
+        throw e;
+      }
     }
     return sentence; // fallback to full sentence
   }
