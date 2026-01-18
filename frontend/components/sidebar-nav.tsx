@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Mic, Settings, ChevronRight, LogOut, Users, ClipboardCheck } from "lucide-react"
+import { LayoutDashboard, Mic, Settings, ChevronRight, LogOut, Users, ClipboardCheck, BarChart3 } from "lucide-react"
 import { logoutFromAPI, getUser } from "@/lib/auth"
 import { useState, useEffect } from "react"
 import { getConnectionCounts, ApiError } from "@/lib/api"
@@ -29,6 +29,11 @@ const staticNavItems: NavItem[] = [
     label: "Connections",
     href: "/connections",
     icon: Users,
+  },
+  {
+    label: "Analytics",
+    href: "/dashboard/analytics",
+    icon: BarChart3,
   },
   {
     label: "Voice Agent",
