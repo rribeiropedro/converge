@@ -294,8 +294,14 @@ export const registerSessionSocket = (io) => {
         // Close Deepgram connection
         closeDeepgramConnection();
 
+        console.log(`[SessionSocket] ════════════════════════════════════════════════`);
+        console.log(`[SessionSocket] 🔚 ENDING SESSION: ${currentSessionId}`);
+        console.log(`[SessionSocket] ════════════════════════════════════════════════`);
+
         // Get LiveInsightEngine's extracted data (real-time LLM extractions)
         const insightState = insightEngine ? insightEngine.getFinalState() : null;
+        
+        console.log(`[SessionSocket] 📊 InsightEngine state received:`, insightState ? 'YES' : 'NULL');
         
         // Clean up insight engine
         if (insightEngine) {
@@ -305,6 +311,7 @@ export const registerSessionSocket = (io) => {
 
         // Get session snapshot
         const sessionSnapshot = SessionManager.finalizeSession(currentSessionId);
+        console.log(`[SessionSocket] 📸 Session snapshot: userId=${sessionSnapshot.userId}, chunks=${sessionSnapshot.audio.transcript_chunks.length}`);
 
         // Start with insight engine data (already has profile fields extracted)
         let audioData = {
@@ -367,6 +374,27 @@ export const registerSessionSocket = (io) => {
           ...sessionSnapshot.visual,
         };
 
+        // Log what we're about to save
+        console.log(`[SessionSocket] ────────────────────────────────────────────────`);
+        console.log(`[SessionSocket] 💾 SAVING TO MONGODB:`);
+        console.log(`[SessionSocket] ────────────────────────────────────────────────`);
+        console.log(`[SessionSocket]   Profile:`);
+        console.log(`[SessionSocket]     - name: ${JSON.stringify(audioData.profile.name)}`);
+        console.log(`[SessionSocket]     - company: ${JSON.stringify(audioData.profile.company)}`);
+        console.log(`[SessionSocket]     - role: ${JSON.stringify(audioData.profile.role)}`);
+        console.log(`[SessionSocket]     - institution: ${JSON.stringify(insightState?.institution)}`);
+        console.log(`[SessionSocket]     - major: ${JSON.stringify(insightState?.major)}`);
+        console.log(`[SessionSocket]   Audio data:`);
+        console.log(`[SessionSocket]     - topics_discussed: [${audioData.topics_discussed?.slice(0, 3).join(', ')}${audioData.topics_discussed?.length > 3 ? '...' : ''}]`);
+        console.log(`[SessionSocket]     - their_challenges: [${audioData.their_challenges?.slice(0, 3).join(', ')}${audioData.their_challenges?.length > 3 ? '...' : ''}]`);
+        console.log(`[SessionSocket]     - follow_up_hooks: ${audioData.follow_up_hooks?.length || 0} items`);
+        console.log(`[SessionSocket]     - personal_details: [${audioData.personal_details?.slice(0, 3).join(', ')}${audioData.personal_details?.length > 3 ? '...' : ''}]`);
+        console.log(`[SessionSocket]     - transcript_summary: "${(audioData.transcript_summary || '').substring(0, 100)}..."`);
+        console.log(`[SessionSocket]   Visual data:`);
+        console.log(`[SessionSocket]     - face_embedding: ${visualData.face_embedding?.length || 0} dimensions`);
+        console.log(`[SessionSocket]     - headshot: ${visualData.headshot ? 'YES' : 'NO'}`);
+        console.log(`[SessionSocket] ────────────────────────────────────────────────`);
+
         // Create draft connection in MongoDB
         const draftConnection = await createDraftConnection(
           audioData,
@@ -381,7 +409,8 @@ export const registerSessionSocket = (io) => {
           }
         );
 
-        console.log(`[SessionSocket] Session ${currentSessionId} finalized, Connection ID: ${draftConnection._id}`);
+        console.log(`[SessionSocket] ✅ SAVED! Connection ID: ${draftConnection._id}`);
+        console.log(`[SessionSocket] ════════════════════════════════════════════════`);
 
         // Emit finalized event with connection details
         socket.emit('session:finalized', {

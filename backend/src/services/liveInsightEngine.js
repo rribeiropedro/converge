@@ -290,26 +290,56 @@ class LiveInsightEngine {
   }
 
   /**
+   * Extract clean value from a sentence like "My name is Pedro" -> "Pedro"
+   */
+  extractValue(sentence, patterns) {
+    if (!sentence) return null;
+    for (const pattern of patterns) {
+      const match = sentence.match(new RegExp(pattern, 'i'));
+      if (match && match[1]) return match[1].trim();
+    }
+    return sentence; // fallback to full sentence
+  }
+
+  /**
    * Get final state for MongoDB commit
    * Returns data structured for Connection schema
+   * Extracts clean values from sentences for DB storage
    */
   getFinalState() {
-    return {
-      // Profile fields with confidence structure
-      name: this.extractedData.name 
-        ? { value: this.extractedData.name, confidence: 'medium', source: 'livekit' }
+    // Extract clean values from sentences
+    const nameValue = this.extractValue(this.extractedData.name, [
+      'name is (.+?)(?:\\.|,|$)', 'called (.+?)(?:\\.|,|$)', "I'm (.+?)(?:\\.|,|$)"
+    ]);
+    const companyValue = this.extractValue(this.extractedData.company, [
+      'works? (?:at|for) (.+?)(?:\\.|,|$)', 'company (?:is|called) (.+?)(?:\\.|,|$)'
+    ]);
+    const roleValue = this.extractValue(this.extractedData.role, [
+      'is an? (.+?)(?:\\.|,|$)', 'works? as an? (.+?)(?:\\.|,|$)', 'wants to work (?:as|in) an? (.+?)(?:\\.|,|$)'
+    ]);
+    const institutionValue = this.extractValue(this.extractedData.institution, [
+      'school at (.+?)(?:\\.|,|$)', 'goes to (.+?)(?:\\.|,|$)', 'attends (.+?)(?:\\.|,|$)', 'student at (.+?)(?:\\.|,|$)'
+    ]);
+    const majorValue = this.extractValue(this.extractedData.major, [
+      'studies (.+?)(?:\\.|,|$)', 'majoring in (.+?)(?:\\.|,|$)', 'major is (.+?)(?:\\.|,|$)'
+    ]);
+
+    const finalState = {
+      // Profile fields with confidence structure - clean values for DB
+      name: nameValue 
+        ? { value: nameValue, confidence: 'medium', source: 'livekit' }
         : null,
-      company: this.extractedData.company
-        ? { value: this.extractedData.company, confidence: 'medium', source: 'livekit' }
+      company: companyValue
+        ? { value: companyValue, confidence: 'medium', source: 'livekit' }
         : null,
-      role: this.extractedData.role
-        ? { value: this.extractedData.role, confidence: 'medium', source: 'livekit' }
+      role: roleValue
+        ? { value: roleValue, confidence: 'medium', source: 'livekit' }
         : null,
-      institution: this.extractedData.institution
-        ? { value: this.extractedData.institution, confidence: 'medium', source: 'livekit' }
+      institution: institutionValue
+        ? { value: institutionValue, confidence: 'medium', source: 'livekit' }
         : null,
-      major: this.extractedData.major
-        ? { value: this.extractedData.major, confidence: 'medium', source: 'livekit' }
+      major: majorValue
+        ? { value: majorValue, confidence: 'medium', source: 'livekit' }
         : null,
       
       // Audio fields
@@ -329,6 +359,22 @@ class LiveInsightEngine {
       // Raw transcript for final processing
       fullTranscript: this.transcriptBuffer.trim()
     };
+
+    // Log final state for MongoDB
+    console.log(`[LiveInsightEngine] 📦 Final state for MongoDB:`);
+    console.log(`  📝 Raw extracted data:`, JSON.stringify(this.extractedData, null, 2));
+    console.log(`  🎯 Cleaned values for DB:`);
+    console.log(`     - name: "${nameValue || 'null'}"`);
+    console.log(`     - company: "${companyValue || 'null'}"`);
+    console.log(`     - role: "${roleValue || 'null'}"`);
+    console.log(`     - institution: "${institutionValue || 'null'}"`);
+    console.log(`     - major: "${majorValue || 'null'}"`);
+    console.log(`     - topics: [${this.extractedData.topics.join(', ')}]`);
+    console.log(`     - challenges: [${this.extractedData.challenges.join(', ')}]`);
+    console.log(`     - hooks: [${this.extractedData.hooks.join(', ')}]`);
+    console.log(`     - personal: [${this.extractedData.personal.join(', ')}]`);
+
+    return finalState;
   }
 
   /**
