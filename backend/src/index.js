@@ -1,27 +1,36 @@
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { Server } from 'socket.io';
 import connectDB from './config/database.js';
 import apiRoutes from './routes/index.js';
 import transcribeRoutes from './routes/transcribeRoutes.js';
+import { registerTranscribeLiveSocket } from './realtime/transcribeSocket.js';
 
 // Load environment variables
 dotenv.config();
 
 // Initialize Express app
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 5000;
 
 // Connect to MongoDB
 connectDB();
 
 // Middleware
-app.use(cors({
+const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
-  credentials: true
-}));
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const io = new Server(server, { cors: corsOptions });
+registerTranscribeLiveSocket(io);
 
 // API Routes
 app.use('/api', apiRoutes);
@@ -47,7 +56,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
 });

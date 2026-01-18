@@ -1,4 +1,4 @@
-import { createClient } from '@deepgram/sdk';
+import { createClient, LiveTranscriptionEvents } from '@deepgram/sdk';
 
 const getDeepgramClient = () => {
   const apiKey = process.env.DEEPGRAM_API_KEY;
@@ -7,6 +7,18 @@ const getDeepgramClient = () => {
   }
 
   return createClient(apiKey);
+};
+
+export const createLiveTranscriptionConnection = (options = {}) => {
+  const deepgram = getDeepgramClient();
+
+  return deepgram.listen.live({
+    model: 'nova-3',
+    language: 'en',
+    diarize: true,
+    smart_format: true,
+    ...options,
+  });
 };
 
 export const transcribe = async (req, res) => {
@@ -46,5 +58,10 @@ export const transcribe = async (req, res) => {
 };
 
 export const transcribeLive = async (req, res) => {
-  res.status(501).json({ error: 'Live transcription not implemented yet' });
+  res.status(426).json({
+    error: 'Use WebSocket for live transcription',
+    endpoint: '/api/transcribe/live',
+  });
 };
+
+export { LiveTranscriptionEvents };
