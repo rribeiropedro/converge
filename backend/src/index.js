@@ -17,13 +17,14 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
 
 // Connect to MongoDB (optional - comment out if not using MongoDB)
-// connectDB();
+connectDB();
 
 // Middleware
-app.use(cors({
+const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:3001',
   credentials: true
-}));
+};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
