@@ -163,18 +163,43 @@ export default function ProfilePage() {
                 </Badge>
               </div>
 
-              {connection.role && (
-                <div className="flex items-center gap-2 mb-2">
-                  <p className="text-sm text-muted-foreground">{connection.role}</p>
-                  {connection.roleConfidence && (
-                    <Badge
-                      variant="outline"
-                      className={`text-xs ${getConfidenceColor(connection.roleConfidence)}`}
-                    >
-                      {connection.roleConfidence}
-                    </Badge>
+              {/* Show role for professionals, or major/institution for students */}
+              {connection.isStudent ? (
+                <>
+                  {(connection.major || connection.institution) && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-sm text-muted-foreground">
+                        {connection.major && connection.institution
+                          ? `${connection.major} at ${connection.institution}`
+                          : connection.major || connection.institution}
+                      </p>
+                      {(connection.majorConfidence || connection.institutionConfidence) && (
+                        <Badge
+                          variant="outline"
+                          className={`text-xs ${getConfidenceColor(
+                            connection.majorConfidence || connection.institutionConfidence || 'medium'
+                          )}`}
+                        >
+                          {connection.majorConfidence || connection.institutionConfidence}
+                        </Badge>
+                      )}
+                    </div>
                   )}
-                </div>
+                </>
+              ) : (
+                connection.role && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <p className="text-sm text-muted-foreground">{connection.role}</p>
+                    {connection.roleConfidence && (
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${getConfidenceColor(connection.roleConfidence)}`}
+                      >
+                        {connection.roleConfidence}
+                      </Badge>
+                    )}
+                  </div>
+                )
               )}
 
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-3">
@@ -182,7 +207,7 @@ export default function ProfilePage() {
                   <MapPin className="h-3 w-3" />
                   {connection.city}
                 </div>
-                {connection.industry && (
+                {!connection.isStudent && connection.industry && (
                   <div className="flex items-center gap-1">
                     <Briefcase className="h-3 w-3" />
                     {connection.industry}
@@ -210,19 +235,58 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Company info with confidence */}
-          <div className="mt-4 pt-4 border-t border-border">
-            <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">{connection.company}</span>
-              <Badge
-                variant="outline"
-                className={`text-xs ${getConfidenceColor(connection.companyConfidence)}`}
-              >
-                {connection.companyConfidence}
-              </Badge>
-            </div>
-          </div>
+          {/* Company info for professionals, or Education info for students */}
+          {connection.isStudent ? (
+            (connection.institution || connection.major) && (
+              <div className="mt-4 pt-4 border-t border-border space-y-2">
+                {connection.institution && (
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">{connection.institution}</span>
+                    {connection.institutionConfidence && (
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${getConfidenceColor(connection.institutionConfidence)}`}
+                      >
+                        {connection.institutionConfidence}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+                {connection.major && (
+                  <div className="flex items-center gap-2">
+                    <Briefcase className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">{connection.major}</span>
+                    {connection.majorConfidence && (
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${getConfidenceColor(connection.majorConfidence)}`}
+                      >
+                        {connection.majorConfidence}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            connection.company && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">{connection.company}</span>
+                  {connection.companyConfidence && (
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${getConfidenceColor(connection.companyConfidence)}`}
+                    >
+                      {connection.companyConfidence}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            )
+          )}
         </div>
 
         {/* Context: Where Met - Notion style */}
