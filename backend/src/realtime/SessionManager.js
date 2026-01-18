@@ -38,6 +38,7 @@ class SessionManager {
       userId,
       visual: {
         face_embedding: [],
+        is_speaking: false,
         appearance: {
           description: '',
           distinctive_features: []
@@ -97,6 +98,11 @@ class SessionManager {
     // Merge visual data (Overshoot payload may have different structure)
     if (visualData.face_embedding) {
       session.visual.face_embedding = visualData.face_embedding;
+    }
+    
+    // Update speaking state if provided
+    if (typeof visualData.is_speaking === 'boolean') {
+      session.visual.is_speaking = visualData.is_speaking;
     }
     
     if (visualData.appearance) {
@@ -370,4 +376,8 @@ class SessionManager {
 
 // Export singleton instance
 export default new SessionManager();
+
+
+
+
 
