@@ -9,20 +9,16 @@
     "dev": "nodemon src/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@deepgram/sdk": "^3.6.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
-    "mongoose": "^8.5.0",
-    "socket.io": "^4.8.1",
-    "multer": "^1.4.5-lts.1"
-    "@anthropic-ai/sdk": "^0.71.2",
-    "@tensorflow/tfjs-node": "^4.22.0",
-    "@vladmandic/face-api": "^1.7.15",
-    "canvas": "^3.2.1",
-    "face-api.js": "^0.22.2",
     "jsonwebtoken": "^9.0.3",
-    "node-fetch": "^3.3.2"
+    "mongoose": "^8.5.0",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
