@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, signup } from './authUtils';
-import './Auth.css';
+import './AuthPage.css';
 
-function Auth() {
+function AuthPage({ onAuthSuccess }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState('login'); // 'login' or 'signup'
   const [email, setEmail] = useState('');
@@ -45,6 +45,7 @@ function Auth() {
       } else {
         await signup(email, password);
       }
+      onAuthSuccess();
       navigate('/record');
     } catch (err) {
       setError(err.message);
@@ -196,7 +197,10 @@ function Auth() {
             {/* Hackathon: Skip to recording */}
             <button
               type="button"
-              onClick={() => navigate('/record')}
+              onClick={() => {
+                onAuthSuccess();
+                navigate('/record');
+              }}
               className="skip-button"
             >
               Skip to Recording (Demo Mode)
@@ -208,5 +212,5 @@ function Auth() {
   );
 }
 
-export default Auth;
+export default AuthPage;
 
