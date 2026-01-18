@@ -247,13 +247,26 @@ export default function AgentPage() {
           }
         })
         
-        // Also listen for data messages (for any custom data if needed)
-        room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
+        // Also listen for data messages (for profile data)
+        room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant, kind?: any) => {
           try {
             const decoder = new TextDecoder()
             const data = JSON.parse(decoder.decode(payload))
             console.log('Data message received:', data)
-            // Handle any custom data messages if needed
+            
+            // Handle profile data
+            if (data.type === 'profile_data' && data.profiles && Array.isArray(data.profiles)) {
+              // Create profile messages for each profile
+              data.profiles.forEach((profileData: MongoDBConnection, index: number) => {
+                const profileMessage: Message = {
+                  id: `profile-${Date.now()}-${index}`,
+                  type: "profile",
+                  content: "",
+                  profileData: profileData,
+                }
+                setMessages(prev => [...prev, profileMessage])
+              })
+            }
           } catch (error) {
             console.error('Error parsing data message:', error)
           }
