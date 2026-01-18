@@ -5,6 +5,8 @@
  * Overshoot (visual) and LiveKit/Deepgram (audio) streams.
  */
 
+import * as logger from '../utils/sessionLogger.js';
+
 class SessionManager {
   constructor() {
     // In-memory Map: sessionId -> session state
@@ -77,7 +79,7 @@ class SessionManager {
     };
 
     this.sessions.set(sessionId, session);
-    console.log(`[SessionManager] Created session ${sessionId} for user ${userId}`);
+    logger.logSessionCreated(sessionId, userId, context);
     return session;
   }
 
@@ -121,7 +123,7 @@ class SessionManager {
     // Update last activity timestamp
     session.lastActivity = new Date();
     
-    console.log(`[SessionManager] Updated visual data for session ${sessionId}`);
+    logger.logVisualDataReceived(sessionId, session.visual);
     return session;
   }
 
@@ -150,7 +152,12 @@ class SessionManager {
     // Update last activity timestamp
     session.lastActivity = new Date();
     
-    console.log(`[SessionManager] Updated face match for session ${sessionId}: matched=${matchData.matched}`);
+    // Note: allMatches will be passed from the caller if available
+    logger.logFaceMatchResult(sessionId, matchData.matched, {
+      name: matchData.name,
+      connectionId: matchData.connectionId,
+      score: matchData.connectionData?.score
+    });
     return session;
   }
 
@@ -167,9 +174,7 @@ class SessionManager {
 
     // If it's a transcript chunk, accumulate it
     if (audioData.transcript) {
-      const speakerLabel = audioData.speaker !== undefined ? `[Speaker ${audioData.speaker}]` : '';
-      const finalLabel = audioData.is_final ? '(final)' : '(interim)';
-      console.log(`[SessionManager] 📝 Transcript ${finalLabel} ${speakerLabel}: "${audioData.transcript}"`);
+      logger.logTranscriptReceived(sessionId, audioData.transcript, audioData.is_final, audioData.speaker);
       
       session.audio.transcript_chunks.push({
         transcript: audioData.transcript,
@@ -231,7 +236,25 @@ class SessionManager {
     // Update last activity timestamp
     session.lastActivity = new Date();
     
-    console.log(`[SessionManager] Updated audio data for session ${sessionId}`);
+    // Log profile updates if profile data was merged
+    if (audioData.profile) {
+      const session = this.sessions.get(sessionId);
+      ['name', 'company', 'role'].forEach(field => {
+        const newField = audioData.profile[field];
+        const currentField = session.audio.profile[field];
+        if (newField?.value && newField.value !== currentField?.value) {
+          logger.logProfileFieldUpdate(
+            sessionId,
+            field,
+            currentField?.value,
+            newField.value,
+            currentField?.confidence,
+            newField.confidence
+          );
+        }
+      });
+    }
+    
     return session;
   }
 
@@ -272,7 +295,7 @@ class SessionManager {
 
     // Purge from memory
     this.sessions.delete(sessionId);
-    console.log(`[SessionManager] Finalized and purged session ${sessionId}`);
+    logger.logSessionFinalizationStarted(sessionId, snapshot.duration);
 
     return snapshot;
   }
@@ -293,7 +316,7 @@ class SessionManager {
     }
 
     if (staleSessionIds.length > 0) {
-      console.log(`[SessionManager] Found ${staleSessionIds.length} stale session(s), auto-finalizing...`);
+      logger.logStaleSessionCleanup(staleSessionIds);
       return staleSessionIds;
     }
 

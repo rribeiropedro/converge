@@ -2,7 +2,9 @@ import SessionManager from './SessionManager.js';
 import { createLiveTranscriptionConnection, LiveTranscriptionEvents } from '../controllers/transcribeController.js';
 import { parseVisualData } from '../services/visualParser.js';
 import { parseTranscript } from '../services/transcriptParser.js';
-import { createDraftConnection } from '../services/processingService.js';
+import { createDraftConnection, addInteractionToExistingConnection } from '../services/processingService.js';
+import { findMatchingConnection } from '../services/faceMatching.js';
+import * as logger from '../utils/sessionLogger.js';
 import LiveInsightEngine from '../services/liveInsightEngine.js';
 
 const SESSION_NAMESPACE = '/api/session';
@@ -64,7 +66,7 @@ export const registerSessionSocket = (io) => {
     const startDeepgramConnection = (options = {}) => {
       if (deepgramConnection) return;
 
-      console.log(`[SessionSocket] Starting Deepgram connection for session ${currentSessionId}`);
+      logger.logDeepgramConnection(currentSessionId, 'starting', { message: 'Initializing Deepgram connection...' });
 
       try {
         deepgramConnection = createLiveTranscriptionConnection({
@@ -78,18 +80,19 @@ export const registerSessionSocket = (io) => {
         });
         console.log(`[SessionSocket] Deepgram connection created for session ${currentSessionId}`);
       } catch (error) {
-        console.error(`[SessionSocket] Failed to create Deepgram connection:`, error);
+        logger.logError(currentSessionId, 'Deepgram connection creation', error);
+        logger.logDeepgramConnection(currentSessionId, 'error', { message: error.message });
         socket.emit('session:error', { message: `Deepgram error: ${error.message}` });
         return;
       }
 
       deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
-        console.log(`[SessionSocket] Deepgram connection opened for session ${currentSessionId}`);
+        logger.logDeepgramConnection(currentSessionId, 'opened', { message: 'Connection ready' });
         deepgramReady = true;
         
         // Flush queued audio chunks now that connection is ready
         if (audioQueue.length > 0) {
-          console.log(`[SessionSocket] Flushing ${audioQueue.length} queued audio chunks`);
+          console.log(`  Flushing ${audioQueue.length} queued audio chunks`);
           audioQueue.forEach(buffer => deepgramConnection.send(buffer));
           audioQueue = [];
         }
@@ -107,9 +110,6 @@ export const registerSessionSocket = (io) => {
           words.map((word) => word.speaker).filter((speaker) => speaker !== undefined)
         );
         const speaker = speakers.size > 1 ? `${words[0]?.speaker}+` : words[0]?.speaker;
-
-        // Log all Deepgram responses (even empty ones) for debugging
-        console.log(`[SessionSocket] Deepgram response: is_final=${data.is_final}, transcript="${transcript.substring(0, 50)}${transcript.length > 50 ? '...' : ''}"`);
 
         if (!transcript) return;
 
@@ -137,13 +137,14 @@ export const registerSessionSocket = (io) => {
               .join(' ')
           });
         } catch (error) {
-          console.error(`[SessionSocket] Error updating audio for session ${currentSessionId}:`, error);
+          logger.logError(currentSessionId, 'Audio update', error);
           socket.emit('session:error', { message: error.message });
         }
       });
 
       deepgramConnection.on(LiveTranscriptionEvents.Error, (error) => {
-        console.error(`[SessionSocket] ❌ Deepgram error:`, error);
+        logger.logError(currentSessionId, 'Deepgram error', error);
+        logger.logDeepgramConnection(currentSessionId, 'error', { message: error?.message || 'Unknown error' });
         socket.emit('session:error', {
           message: `Deepgram error: ${error?.message || 'Unknown error'}`,
           details: error
@@ -187,18 +188,13 @@ export const registerSessionSocket = (io) => {
         // Store socket reference for cross-module communication
         sessionSocketMap.set(sessionId, socket);
 
-        // Create LiveInsightEngine for real-time transcript extraction
-        insightEngine = new LiveInsightEngine(sessionId, socket);
-
-        console.log(`[SessionSocket] Session started: ${sessionId} for user ${userId}`);
-
         // Emit ready event
         socket.emit('session:ready', {
           sessionId,
           message: 'Session initialized'
         });
       } catch (error) {
-        console.error('[SessionSocket] Error starting session:', error);
+        logger.logError(sessionId, 'Session start', error);
         socket.emit('session:error', { message: error.message });
       }
     });
@@ -209,6 +205,34 @@ export const registerSessionSocket = (io) => {
         if (!currentSessionId) {
           socket.emit('session:error', { message: 'No active session. Call session:start first.' });
           return;
+        }
+
+        // Log raw visual data received
+        console.log(`\n📥 Raw visual data received for session ${currentSessionId}`);
+        console.log(`  Data keys: ${Object.keys(data).join(', ')}`);
+        
+        // Check if this is an Overshoot result and parse it
+        if (data.result) {
+          let parsedResult = null;
+          try {
+            parsedResult = typeof data.result === 'string' 
+              ? JSON.parse(data.result) 
+              : data.result;
+            
+            console.log(`  📋 Parsed Overshoot Result:`);
+            console.log(`    face_detected: ${parsedResult.face_detected}`);
+            console.log(`    appearance_profile: ${parsedResult.appearance_profile ? 'Present' : 'Missing'}`);
+            console.log(`    environment_context: ${parsedResult.environment_context ? 'Present' : 'Missing'}`);
+          } catch (e) {
+            console.log(`  ⚠️ Could not parse result as JSON`);
+          }
+        }
+        
+        if (data.headshot) {
+          console.log(`  Headshot: ${data.headshot.url ? 'URL present' : ''} ${data.headshot.base64 ? 'Base64 present' : ''}`);
+        }
+        if (data.face_embedding) {
+          console.log(`  Face embedding: ${data.face_embedding.length} dimensions`);
         }
 
         // Parse visual data (may need processing via visualParser)
@@ -234,9 +258,25 @@ export const registerSessionSocket = (io) => {
 
         // Perform face matching immediately if we have a face embedding
         if (parsedVisual.face_embedding && parsedVisual.face_embedding.length === 128) {
+          logger.logFaceMatchingStarted(
+            currentSessionId, 
+            true, 
+            parsedVisual.face_embedding.length
+          );
           try {
             const userId = session.userId;
             const matches = await findMatchingConnection(userId, parsedVisual.face_embedding);
+            
+            logger.logFaceMatchResult(
+              currentSessionId,
+              matches.length > 0 && matches[0].score >= 0.80,
+              matches.length > 0 ? {
+                name: matches[0].connection.name?.value || matches[0].connection.name || 'Unknown',
+                connectionId: matches[0].connection._id.toString(),
+                score: matches[0].score
+              } : null,
+              matches
+            );
             
             if (matches.length > 0 && matches[0].score >= 0.80) {
               // Match found - update session with match results
@@ -265,10 +305,8 @@ export const registerSessionSocket = (io) => {
                   { type: 'bullet', text: 'Previous connection found' }
                 ]
               });
-
-              console.log(`[SessionSocket] Face match found during visual update: ${bestMatch.connection.name?.value} (score: ${bestMatch.score})`);
             } else {
-              // No match found - new person
+              // No match found - new person (already logged above)
               SessionManager.updateFaceMatch(currentSessionId, {
                 matched: false,
                 connectionId: null,
@@ -289,11 +327,9 @@ export const registerSessionSocket = (io) => {
                   { type: 'bullet', text: 'Ready to save new connection' }
                 ]
               });
-
-              console.log(`[SessionSocket] No face match found during visual update - new person`);
             }
           } catch (error) {
-            console.error('[SessionSocket] Error during face matching in visual update:', error);
+            logger.logError(currentSessionId, 'Face matching', error);
             // Don't fail the whole visual update if face matching fails
             SessionManager.updateFaceMatch(currentSessionId, {
               matched: false,
@@ -302,6 +338,9 @@ export const registerSessionSocket = (io) => {
               connectionData: null
             });
           }
+        } else {
+          // No face embedding available
+          logger.logFaceMatchingStarted(currentSessionId, false, 0);
         }
 
         // Emit visual update to client
@@ -337,10 +376,7 @@ export const registerSessionSocket = (io) => {
         const buffer = toBuffer(chunk);
         if (buffer) {
           audioChunkCount++;
-          // Log first chunk and then every 20th chunk to avoid spam
-          if (audioChunkCount === 1 || audioChunkCount % 20 === 0) {
-            console.log(`[SessionSocket] 🎵 Audio chunk #${audioChunkCount} received (${buffer.length} bytes)`);
-          }
+          logger.logAudioChunkReceived(currentSessionId, audioChunkCount, buffer.length);
           
           // Queue chunks until connection is ready, then send directly
           if (deepgramReady && deepgramConnection) {
@@ -350,7 +386,7 @@ export const registerSessionSocket = (io) => {
           }
         }
       } catch (error) {
-        console.error('[SessionSocket] Error processing audio chunk:', error);
+        logger.logError(currentSessionId, 'Audio chunk processing', error);
         socket.emit('session:error', { message: error.message });
       }
     });
@@ -416,8 +452,11 @@ export const registerSessionSocket = (io) => {
 
           if (fullTranscript) {
             try {
-              // Parse transcript to extract profile data (comprehensive final pass)
+              logger.logTranscriptParsing(currentSessionId, fullTranscript.length);
+              // Parse transcript to extract profile data
               const parsed = await parseTranscript(fullTranscript);
+              
+              logger.logProfileExtracted(currentSessionId, parsed);
               
               // Merge parsed data with existing audio data
               // Only override if parsed has higher confidence
@@ -435,54 +474,66 @@ export const registerSessionSocket = (io) => {
                 }
               };
             } catch (error) {
-              console.warn('[SessionSocket] Failed to parse transcript, using accumulated data:', error);
+              logger.logError(currentSessionId, 'Transcript parsing', error);
               audioData.transcript_summary = fullTranscript.substring(0, 500); // Truncate if too long
             }
           }
         }
 
-        // Prepare visual data with institution/major from insight engine
-        const visualData = {
-          ...sessionSnapshot.visual,
-        };
+        // Check if we have a face match from headshot generation
+        const faceMatch = sessionSnapshot.visual.faceMatch;
+        let finalConnection;
+        let actionType;
 
-        // Log what we're about to save
-        console.log(`[SessionSocket] ────────────────────────────────────────────────`);
-        console.log(`[SessionSocket] 💾 SAVING TO MONGODB:`);
-        console.log(`[SessionSocket] ────────────────────────────────────────────────`);
-        console.log(`[SessionSocket]   Profile:`);
-        console.log(`[SessionSocket]     - name: ${JSON.stringify(audioData.profile.name)}`);
-        console.log(`[SessionSocket]     - company: ${JSON.stringify(audioData.profile.company)}`);
-        console.log(`[SessionSocket]     - role: ${JSON.stringify(audioData.profile.role)}`);
-        console.log(`[SessionSocket]     - institution: ${JSON.stringify(insightState?.institution)}`);
-        console.log(`[SessionSocket]     - major: ${JSON.stringify(insightState?.major)}`);
-        console.log(`[SessionSocket]   Audio data:`);
-        console.log(`[SessionSocket]     - topics_discussed: [${audioData.topics_discussed?.slice(0, 3).join(', ')}${audioData.topics_discussed?.length > 3 ? '...' : ''}]`);
-        console.log(`[SessionSocket]     - their_challenges: [${audioData.their_challenges?.slice(0, 3).join(', ')}${audioData.their_challenges?.length > 3 ? '...' : ''}]`);
-        console.log(`[SessionSocket]     - follow_up_hooks: ${audioData.follow_up_hooks?.length || 0} items`);
-        console.log(`[SessionSocket]     - personal_details: [${audioData.personal_details?.slice(0, 3).join(', ')}${audioData.personal_details?.length > 3 ? '...' : ''}]`);
-        console.log(`[SessionSocket]     - transcript_summary: "${(audioData.transcript_summary || '').substring(0, 100)}..."`);
-        console.log(`[SessionSocket]   Visual data:`);
-        console.log(`[SessionSocket]     - face_embedding: ${visualData.face_embedding?.length || 0} dimensions`);
-        console.log(`[SessionSocket]     - headshot: ${visualData.headshot ? 'YES' : 'NO'}`);
-        console.log(`[SessionSocket] ────────────────────────────────────────────────`);
+        if (faceMatch?.matched && faceMatch.connectionId) {
+          // UPDATE EXISTING CONNECTION
+          logger.logConnectionDecision(currentSessionId, 'updated', {
+            connectionId: faceMatch.connectionId,
+            name: faceMatch.name,
+            matchScore: faceMatch.connectionData?.score
+          });
+          
+          try {
+            finalConnection = await addInteractionToExistingConnection(
+              faceMatch.connectionId,
+              audioData,
+              sessionSnapshot.visual,
+              sessionSnapshot.context,
+              sessionSnapshot.userId
+            );
 
-        // Create draft connection in MongoDB
-        const draftConnection = await createDraftConnection(
-          audioData,
-          visualData,
-          sessionSnapshot.context,
-          sessionSnapshot.userId,
-          false, // Not temporary
-          {
-            // Pass additional profile fields from insight engine
-            institution: insightState?.institution || null,
-            major: insightState?.major || null,
+            actionType = 'updated';
+          } catch (error) {
+            logger.logError(currentSessionId, 'Update existing connection', error);
+            // Fallback to creating new connection if update fails
+            logger.logConnectionDecision(currentSessionId, 'created', {
+              reason: 'Update failed, falling back to create new'
+            });
+            finalConnection = await createDraftConnection(
+              audioData,
+              sessionSnapshot.visual,
+              sessionSnapshot.context,
+              sessionSnapshot.userId,
+              false // Not temporary
+            );
+            actionType = 'created';
           }
-        );
+        } else {
+          // CREATE NEW CONNECTION
+          logger.logConnectionDecision(currentSessionId, 'created', {
+            reason: 'No face match found'
+          });
+          
+          finalConnection = await createDraftConnection(
+            audioData,
+            sessionSnapshot.visual,
+            sessionSnapshot.context,
+            sessionSnapshot.userId,
+            false // Not temporary
+          );
 
-        console.log(`[SessionSocket] ✅ SAVED! Connection ID: ${draftConnection._id}`);
-        console.log(`[SessionSocket] ════════════════════════════════════════════════`);
+          actionType = 'created';
+        }
 
         // Emit finalized event with connection details
         socket.emit('session:finalized', {
@@ -498,11 +549,21 @@ export const registerSessionSocket = (io) => {
             : 'Session finalized and saved to database'
         });
 
+        logger.logSessionFinalized(
+          currentSessionId,
+          finalConnection._id.toString(),
+          actionType,
+          {
+            name: finalConnection.name.value,
+            company: finalConnection.company.value
+          }
+        );
+
         // Clean up socket reference
         sessionSocketMap.delete(currentSessionId);
         currentSessionId = null;
       } catch (error) {
-        console.error('[SessionSocket] Error finalizing session:', error);
+        logger.logError(currentSessionId, 'Session finalization', error);
         socket.emit('session:error', { message: error.message });
       }
     });
@@ -527,7 +588,6 @@ export const registerSessionSocket = (io) => {
         
         const staleIds = SessionManager.checkStaleSessions();
         if (staleIds.includes(currentSessionId)) {
-          console.log(`[SessionSocket] Auto-finalizing stale session ${currentSessionId} on disconnect`);
           // Note: We could auto-finalize here, but it's safer to let the cleanup interval handle it
           // to avoid race conditions
         }
@@ -541,8 +601,6 @@ export const registerSessionSocket = (io) => {
   setInterval(() => {
     const staleIds = SessionManager.checkStaleSessions();
     if (staleIds.length > 0) {
-      console.log(`[SessionSocket] Auto-finalizing ${staleIds.length} stale session(s)`);
-      
       staleIds.forEach(async (sessionId) => {
         try {
           const sessionSnapshot = SessionManager.finalizeSession(sessionId);
@@ -565,7 +623,9 @@ export const registerSessionSocket = (io) => {
 
             if (fullTranscript) {
               try {
+                logger.logTranscriptParsing(sessionId, fullTranscript.length);
                 const parsed = await parseTranscript(fullTranscript);
+                logger.logProfileExtracted(sessionId, parsed);
                 audioData = {
                   ...parsed,
                   profile: {
@@ -575,7 +635,7 @@ export const registerSessionSocket = (io) => {
                   }
                 };
               } catch (error) {
-                console.warn(`[SessionSocket] Failed to parse transcript for stale session ${sessionId}:`, error);
+                logger.logError(sessionId, 'Transcript parsing (stale session)', error);
                 audioData.transcript_summary = fullTranscript.substring(0, 500);
               }
             }
@@ -588,7 +648,11 @@ export const registerSessionSocket = (io) => {
 
           if (faceMatch?.matched && faceMatch.connectionId) {
             // UPDATE EXISTING CONNECTION
-            console.log(`[SessionSocket] Stale session ${sessionId}: Face match found: ${faceMatch.name} (Connection ID: ${faceMatch.connectionId})`);
+            logger.logConnectionDecision(sessionId, 'updated', {
+              connectionId: faceMatch.connectionId,
+              name: faceMatch.name,
+              matchScore: faceMatch.connectionData?.score
+            });
             
             try {
               finalConnection = await addInteractionToExistingConnection(
@@ -600,10 +664,12 @@ export const registerSessionSocket = (io) => {
               );
 
               actionType = 'updated';
-              console.log(`[SessionSocket] Auto-finalized stale session ${sessionId}: Updated existing connection ${finalConnection._id}`);
             } catch (error) {
-              console.error(`[SessionSocket] Error updating existing connection for stale session ${sessionId}:`, error);
+              logger.logError(sessionId, 'Update existing connection (stale session)', error);
               // Fallback to creating new connection if update fails
+              logger.logConnectionDecision(sessionId, 'created', {
+                reason: 'Update failed, falling back to create new'
+              });
               finalConnection = await createDraftConnection(
                 audioData,
                 sessionSnapshot.visual,
@@ -615,6 +681,10 @@ export const registerSessionSocket = (io) => {
             }
           } else {
             // CREATE NEW CONNECTION
+            logger.logConnectionDecision(sessionId, 'created', {
+              reason: 'No face match found'
+            });
+            
             finalConnection = await createDraftConnection(
               audioData,
               sessionSnapshot.visual,
@@ -624,13 +694,22 @@ export const registerSessionSocket = (io) => {
             );
 
             actionType = 'created';
-            console.log(`[SessionSocket] Auto-finalized stale session ${sessionId}: Created new draft connection ${finalConnection._id}`);
           }
+          
+          logger.logSessionFinalized(
+            sessionId,
+            finalConnection._id.toString(),
+            actionType,
+            {
+              name: finalConnection.name.value,
+              company: finalConnection.company.value
+            }
+          );
 
           // Clean up socket reference for stale session
           sessionSocketMap.delete(sessionId);
         } catch (error) {
-          console.error(`[SessionSocket] Error auto-finalizing stale session ${sessionId}:`, error);
+          logger.logError(sessionId, 'Auto-finalize stale session', error);
         }
       });
     }

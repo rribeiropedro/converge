@@ -6,6 +6,7 @@ import { generateFaceEmbedding } from '../services/faceEmbeddingService.js';
 import { findMatchingConnection } from '../services/faceMatching.js';
 import SessionManager from '../realtime/SessionManager.js';
 import { getSocketBySessionId } from '../realtime/sessionSocket.js';
+import * as logger from '../utils/sessionLogger.js';
 
 /**
  * Receive and log Overshoot SDK results
@@ -15,11 +16,26 @@ export const receiveOvershootResult = (req, res) => {
   const result = req.body;
   const timestamp = new Date().toLocaleTimeString();
   
+  // Parse result to check for face detection
+  let parsedResult = null;
+  try {
+    parsedResult = typeof result.result === 'string' 
+      ? JSON.parse(result.result) 
+      : result.result;
+  } catch (e) {
+    // Not JSON, that's okay
+  }
+  
+  const faceDetected = parsedResult?.face_detected === true;
+  
   console.log('\n=== Overshoot Result ===');
-  console.log(`[${timestamp}] Result text:`, result.result);
+  console.log(`[${timestamp}] Face Detected: ${faceDetected ? '✅ YES' : '❌ NO'}`);
+  if (parsedResult) {
+    console.log(`[${timestamp}] Appearance: ${parsedResult.appearance_profile || 'N/A'}`);
+    console.log(`[${timestamp}] Environment: ${parsedResult.environment_context || 'N/A'}`);
+  }
   console.log(`[${timestamp}] Inference latency:`, result.inference_latency_ms, 'ms');
   console.log(`[${timestamp}] Total latency:`, result.total_latency_ms, 'ms');
-  console.log(`[${timestamp}] Full result:`, JSON.stringify(result, null, 2));
   console.log('========================\n');
   
   res.json({ status: 'received' });
@@ -31,15 +47,31 @@ export const receiveOvershootResult = (req, res) => {
  */
 export const generateHeadshot = async (req, res) => {
   try {
+    console.log('\n🔔 HEADSHOT GENERATION REQUEST RECEIVED');
+    console.log('  Request body keys:', Object.keys(req.body));
+    console.log('  Has screenshots:', !!req.body.screenshots);
+    console.log('  Screenshot count:', req.body.screenshots?.length || 0);
+    console.log('  Session ID:', req.body.sessionId || 'MISSING');
+    
     const { screenshots, sessionId } = req.body; // Array of base64-encoded images + session ID
     
     if (!screenshots || !Array.isArray(screenshots) || screenshots.length !== 2) {
+      console.error('❌ Invalid screenshots:', {
+        isArray: Array.isArray(screenshots),
+        length: screenshots?.length,
+        type: typeof screenshots
+      });
       return res.status(400).json({ error: 'Exactly 2 screenshots are required' });
     }
 
     if (!sessionId) {
+      console.error('❌ Missing sessionId');
       return res.status(400).json({ error: 'sessionId is required' });
     }
+
+    logger.logHeadshotGeneration(sessionId, 'started', {
+      screenshotCount: screenshots.length
+    });
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
@@ -256,13 +288,27 @@ export const generateHeadshot = async (req, res) => {
       textContent = content;
     }
     
-    // If we have an image, perform face matching
+    // If we have an image, store it in session and perform face matching
     if (extractedImageUrl) {
-      console.log('Successfully extracted image URL from OpenRouter response');
+      logger.logHeadshotGeneration(sessionId, 'success', {
+        imageUrl: extractedImageUrl
+      });
+      
+      // Store headshot in session visual data
+      try {
+        SessionManager.updateVisual(sessionId, {
+          headshot: {
+            url: extractedImageUrl.startsWith('http') ? extractedImageUrl : null,
+            base64: extractedImageUrl.startsWith('data:image') ? extractedImageUrl : null
+          }
+        });
+      } catch (err) {
+        logger.logError(sessionId, 'Storing headshot in session', err);
+      }
       
       // Perform face matching in the background (don't block the response)
       performFaceMatching(extractedImageUrl, sessionId).catch(err => {
-        console.error('Face matching error:', err);
+        logger.logError(sessionId, 'Face matching (background)', err);
       });
       
       return res.json({ 
@@ -282,6 +328,9 @@ export const generateHeadshot = async (req, res) => {
     }
     
     // If we get here, the format is unexpected
+    logger.logHeadshotGeneration(sessionId, 'error', {
+      error: 'Unexpected response format from OpenRouter API'
+    });
     console.error('Unexpected content format:', typeof content, content);
     console.error('Images array:', images);
     return res.status(500).json({ 
@@ -293,6 +342,9 @@ export const generateHeadshot = async (req, res) => {
     });
 
   } catch (error) {
+    logger.logHeadshotGeneration(sessionId, 'error', {
+      error: error.message
+    });
     console.error('Error generating headshot:', error);
     return res.status(500).json({ 
       error: 'Internal server error', 
@@ -318,16 +370,27 @@ async function performFaceMatching(imageUrl, sessionId) {
     }
     
     const userId = session.userId;
-    console.log(`[FaceMatching] Starting face matching for session ${sessionId}, user ${userId}`);
+    
+    logger.logFaceEmbeddingGeneration(sessionId, 'started');
     
     // Generate face embedding from the generated headshot
     let faceEmbedding;
     try {
       faceEmbedding = await generateFaceEmbedding(imageUrl);
-      console.log(`[FaceMatching] Generated face embedding with ${faceEmbedding.length} dimensions`);
+      
+      logger.logFaceEmbeddingGeneration(sessionId, 'success', {
+        dimensions: faceEmbedding.length
+      });
+      
+      // Store face embedding in session visual data
+      SessionManager.updateVisual(sessionId, {
+        face_embedding: faceEmbedding
+      });
     } catch (err) {
       // Couldn't generate embedding - treat as new contact (not an error)
-      console.log(`[FaceMatching] Could not generate face embedding: ${err.message} - treating as new contact`);
+      logger.logFaceEmbeddingGeneration(sessionId, 'error', {
+        error: err.message
+      });
       
       SessionManager.updateFaceMatch(sessionId, {
         matched: false,
@@ -356,46 +419,56 @@ async function performFaceMatching(imageUrl, sessionId) {
     }
     
     // Find matching connection in MongoDB
+    logger.logFaceMatchingStarted(sessionId, true, faceEmbedding.length);
     const matches = await findMatchingConnection(userId, faceEmbedding);
-    console.log(`[FaceMatching] Found ${matches.length} potential matches`);
+    
+    logger.logFaceMatchResult(
+      sessionId,
+      matches.length > 0 && matches[0].score >= 0.80,
+      matches.length > 0 ? {
+        name: matches[0].connection.name?.value || matches[0].connection.name || 'Unknown',
+        connectionId: matches[0].connection._id.toString(),
+        score: matches[0].score
+      } : null,
+      matches
+    );
     
     // Prepare face match result data for the UI overlay
     let faceMatchResult;
     
-    if (matches.length > 0) {
+    if (matches.length > 0 && matches[0].score >= 0.80) {
       // Best match found
       const bestMatch = matches[0];
-      console.log(`[FaceMatching] Best match: ${bestMatch.connection.name} (score: ${bestMatch.score})`);
       
       // Update session with match results
       SessionManager.updateFaceMatch(sessionId, {
         matched: true,
         connectionId: bestMatch.connection._id.toString(),
-        name: bestMatch.connection.name,
+        name: bestMatch.connection.name?.value || bestMatch.connection.name || 'Unknown',
         connectionData: {
-          company: bestMatch.connection.company,
+          company: bestMatch.connection.company?.value || bestMatch.connection.company || null,
           visual: bestMatch.connection.visual,
           score: bestMatch.score
         }
       });
       
       // Build result for UI with real data
+      const connectionName = bestMatch.connection.name?.value || bestMatch.connection.name || 'Unknown';
+      const connectionCompany = bestMatch.connection.company?.value || bestMatch.connection.company || 'Unknown';
       faceMatchResult = {
         matched: true,
-        name: bestMatch.connection.name,
-        company: bestMatch.connection.company,
-        profileImage: bestMatch.connection.profileImage || null,
+        name: connectionName,
+        company: connectionCompany,
+        profileImage: bestMatch.connection.visual?.headshot?.url || null,
         insights: [
-          { type: 'bullet', text: `Name: ${bestMatch.connection.name}` },
-          { type: 'bullet', text: `Company: ${bestMatch.connection.company || 'Unknown'}` },
+          { type: 'bullet', text: `Name: ${connectionName}` },
+          { type: 'bullet', text: `Company: ${connectionCompany}` },
           { type: 'bullet', text: `Match confidence: ${Math.round(bestMatch.score * 100)}%` },
           { type: 'bullet', text: `Previous connection found` }
         ]
       };
     } else {
-      // No match found - new person
-      console.log(`[FaceMatching] No match found - this is a new person`);
-      
+      // No match found - new person (already logged above)
       SessionManager.updateFaceMatch(sessionId, {
         matched: false,
         connectionId: null,
@@ -421,14 +494,13 @@ async function performFaceMatching(imageUrl, sessionId) {
     // Emit update to client via WebSocket
     const socket = getSocketBySessionId(sessionId);
     if (socket) {
-      console.log(`[FaceMatching] Emitting face_match_result to client:`, faceMatchResult);
       socket.emit('face_match_result', faceMatchResult);
     } else {
-      console.warn(`[FaceMatching] No socket found for session ${sessionId}`);
+      logger.logError(sessionId, 'Face matching - socket not found', new Error('No socket found for session'));
     }
     
   } catch (error) {
-    console.error('[FaceMatching] Error in face matching:', error);
+    logger.logError(sessionId, 'Face matching', error);
   }
 }
 

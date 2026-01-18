@@ -8,13 +8,18 @@ import './CameraRecorder.css';
 function CameraRecorder() {
   const navigate = useNavigate();
   const [isRunning, setIsRunning] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [results, setResults] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [screenshotBuffer, setScreenshotBuffer] = useState([]);
   const [generatedImage, setGeneratedImage] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [sessionId, setSessionId] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [sessionStatus, setSessionStatus] = useState('idle'); // idle, ready, recording, finalized
   const [isRecording, setIsRecording] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [audioTranscript, setAudioTranscript] = useState(null);
   const [showInsightsOverlay, setShowInsightsOverlay] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
@@ -28,12 +33,13 @@ function CameraRecorder() {
 
   // Helper function to update insights data dynamically
   // Example: updateInsights({ items: [...] })
-  const updateInsights = (newData) => {
-    setInsightsData(prev => ({
-      ...prev,
-      ...newData
-    }));
-  };
+  // Note: Currently unused but kept for future use
+  // const updateInsights = (newData) => {
+  //   setInsightsData(prev => ({
+  //     ...prev,
+  //     ...newData
+  //   }));
+  // };
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const sessionSocketRef = useRef(null);
@@ -74,34 +80,35 @@ function CameraRecorder() {
   };
 
   // Helper function to stop camera and vision SDK
-  const stopCamera = async () => {
-    try {
-      // Stop audio recording
-      stopAudioRecording();
-      
-      // Stop Overshoot SDK
-      if (visionRef.current) {
-        await visionRef.current.stop();
-        visionRef.current = null;
-      }
-      
-      // Stop camera stream
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-      
-      // Clear video preview
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-      
-      setIsRunning(false);
-      setScreenshotBuffer([]); // Clear buffer
-    } catch (error) {
-      console.error('Error stopping camera:', error);
-    }
-  };
+  // Note: Currently unused but kept for future use
+  // const stopCamera = async () => {
+  //   try {
+  //     // Stop audio recording
+  //     stopAudioRecording();
+  //     
+  //     // Stop Overshoot SDK
+  //     if (visionRef.current) {
+  //       await visionRef.current.stop();
+  //       visionRef.current = null;
+  //     }
+  //     
+  //     // Stop camera stream
+  //     if (streamRef.current) {
+  //       streamRef.current.getTracks().forEach(track => track.stop());
+  //       streamRef.current = null;
+  //     }
+  //     
+  //     // Clear video preview
+  //     if (videoRef.current) {
+  //       videoRef.current.srcObject = null;
+  //     }
+  //     
+  //     setIsRunning(false);
+  //     setScreenshotBuffer([]); // Clear buffer
+  //   } catch (error) {
+  //     console.error('Error stopping camera:', error);
+  //   }
+  // };
 
   // Start audio recording using session socket for transcription
   const startAudioRecording = async (mediaStream) => {
@@ -592,11 +599,13 @@ function CameraRecorder() {
     }
   };
 
-  const handleUpdatePrompt = (newPrompt) => {
-    if (visionRef.current) {
-      visionRef.current.updatePrompt(newPrompt);
-    }
-  };
+  // Helper function to update prompt dynamically
+  // Note: Currently unused but kept for future use
+  // const handleUpdatePrompt = (newPrompt) => {
+  //   if (visionRef.current) {
+  //     visionRef.current.updatePrompt(newPrompt);
+  //   }
+  // };
 
   // Cleanup on unmount only
   useEffect(() => {
