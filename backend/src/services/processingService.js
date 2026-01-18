@@ -17,53 +17,44 @@ export async function processNewInteraction(audioInput, visualInput, context, us
 
   if (!visualData.face_embedding || visualData.face_embedding.length === 0) {
     console.warn('No face embedding generated. Creating new connection.');
-    const draft = await createDraftConnection(audioData, visualData, context, userId, false);
+    const draft = await createDraftConnection(audioData, visualData, context, userId);
     return { type: 'new', draft };
   }
 
+  // Check for matching face first
   const matches = await findMatchingConnection(userId, visualData.face_embedding);
-  const tempDraft = await createDraftConnection(audioData, visualData, context, userId, true);
-  const matchAction = determineMatchAction(matches, tempDraft);
-
-  switch (matchAction.action) {
-    case 'recognized':
-      const existingConnection = await addInteractionToExistingConnection(
-        matchAction.connection._id,
-        audioData,
-        visualData,
-        context,
-        userId
-      );
-      return {
-        type: 'recognized',
-        connection: existingConnection,
-        interaction: existingConnection.latestInteraction,
-        match_score: matchAction.match_score,
-        message: `Added new interaction with ${existingConnection.name.value}`
-      };
-
-    case 'confirm_match':
-      return {
-        type: 'confirm_match',
-        possible_match: matchAction.possible_match,
-        match_score: matchAction.match_score,
-        draft_profile: matchAction.draft_profile,
-        message: `Is this ${matchAction.possible_match.name?.value || 'this person'}?`
-      };
-
-    case 'create_new':
-    default:
-      return { type: 'new', draft: tempDraft };
+  
+  // Simplified MVP: >= 0.80 = update existing, < 0.80 = create new
+  if (matches.length > 0 && matches[0].score >= 0.80) {
+    // Match found - update existing connection
+    const existingConnection = await addInteractionToExistingConnection(
+      matches[0].connection._id,
+      audioData,
+      visualData,
+      context,
+      userId
+    );
+    return {
+      type: 'recognized',
+      connection: existingConnection,
+      interaction: existingConnection.latestInteraction,
+      match_score: matches[0].score,
+      message: `Recognized ${existingConnection.name.value}! Added new interaction.`
+    };
   }
+
+  // No match or score < 0.80 - create new connection
+  const draft = await createDraftConnection(audioData, visualData, context, userId);
+  return { type: 'new', draft };
 }
 
-export async function createDraftConnection(audioData, visualData, context, userId, temporary = false) {
+export async function createDraftConnection(audioData, visualData, context, userId) {
   const needsReview = calculateNeedsReview(audioData);
   const fieldsNeedingReview = getFieldsNeedingReview(audioData);
 
   const connectionData = {
     user_id: userId,
-    status: temporary ? 'temporary_draft' : 'draft',
+    status: 'draft',
     name: {
       value: audioData.profile.name?.value || 'Unknown',
       confidence: audioData.profile.name?.confidence || 'low',
@@ -184,7 +175,7 @@ export async function createInteractionRecord(userId, connectionId, audioData, v
 export async function approveConnection(connectionId, updates = {}) {
   const connection = await Connection.findById(connectionId);
   if (!connection) throw new Error('Connection not found');
-  if (connection.status !== 'draft' && connection.status !== 'temporary_draft') {
+  if (connection.status !== 'draft') {
     throw new Error('Only draft connections can be approved');
   }
 

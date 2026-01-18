@@ -1,8 +1,8 @@
 import Connection from '../models/Connection.js';
 import { calculateCosineSimilarity } from './faceEmbeddingService.js';
+import mongoose from 'mongoose';
 
-const MATCH_THRESHOLD = 0.85;
-const REVIEW_THRESHOLD = 0.70;
+const MATCH_THRESHOLD = 0.80; // 80% - if score >= 0.80, update existing; if < 0.80, create new
 
 export async function findMatchingConnection(userId, faceEmbedding) {
   if (!faceEmbedding || faceEmbedding.length !== 128) {
@@ -11,21 +11,22 @@ export async function findMatchingConnection(userId, faceEmbedding) {
   }
 
   try {
+    // $vectorSearch MUST be the first stage in the pipeline
+    // Convert userId to ObjectId if it's a string
+    const userIdObj = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+    
     const atlasMatches = await Connection.aggregate([
       {
-        $match: {
-          user_id: userId,
-          status: "approved",
-          'visual.face_embedding.0': { $exists: true }
-        }
-      },
-      {
         $vectorSearch: {
-          queryVector: faceEmbedding,
+          index: "face_vector_index",
           path: "visual.face_embedding",
-          numCandidates: 10,
-          limit: 3,
-          index: "face_vector_index"
+          queryVector: faceEmbedding,
+          numCandidates: 50, // Increased for better accuracy
+          limit: 3, // Return top 3 matches
+          filter: {
+            user_id: userIdObj,
+            status: "approved"
+          }
         }
       },
       {
@@ -39,7 +40,7 @@ export async function findMatchingConnection(userId, faceEmbedding) {
       }
     ]).exec();
 
-    return atlasMatches.filter(match => match.score >= 0.6).map(match => ({
+    return atlasMatches.filter(match => match.score >= MATCH_THRESHOLD).map(match => ({
       connection: match,
       score: match.score
     }));
@@ -57,7 +58,7 @@ export async function findMatchingConnection(userId, faceEmbedding) {
       const score = calculateCosineSimilarity(faceEmbedding, conn.visual.face_embedding);
       return { connection: conn, score };
     })
-    .filter(match => match.score >= 0.6)
+    .filter(match => match.score >= MATCH_THRESHOLD)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
 
@@ -66,17 +67,13 @@ export async function findMatchingConnection(userId, faceEmbedding) {
 }
 
 export function determineMatchAction(matches, draftProfileData) {
-  if (matches.length === 0 || matches[0].score < REVIEW_THRESHOLD) {
+  // Simplified MVP: >= 0.80 = update existing, < 0.80 = create new
+  if (matches.length === 0 || matches[0].score < MATCH_THRESHOLD) {
     return { action: 'create_new', draft: draftProfileData };
   }
 
   const bestMatch = matches[0];
-
-  if (bestMatch.score >= MATCH_THRESHOLD) {
-    return { action: 'recognized', connection: bestMatch.connection, match_score: bestMatch.score };
-  } else {
-    return { action: 'confirm_match', possible_match: bestMatch.connection, match_score: bestMatch.score, draft_profile: draftProfileData };
-  }
+  return { action: 'recognized', connection: bestMatch.connection, match_score: bestMatch.score };
 }
 
 export async function addFaceEmbeddingToHistory(connectionId, newEmbedding, context = {}) {
@@ -103,4 +100,4 @@ export async function addFaceEmbeddingToHistory(connectionId, newEmbedding, cont
   await connection.save();
 }
 
-export { MATCH_THRESHOLD, REVIEW_THRESHOLD };
+export { MATCH_THRESHOLD };
