@@ -53,9 +53,25 @@ function CameraRecorder() {
     navigate('/');
   };
 
-  // Capture current frame from video element
-  const captureVideoFrame = (videoElement) => {
-    if (!videoElement || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) {
+  // Capture current frame from video element (with retry for video readiness)
+  const captureVideoFrame = async (videoElement, maxRetries = 5) => {
+    if (!videoElement) {
+      console.warn('⚠️ captureVideoFrame: videoElement is null');
+      return null;
+    }
+
+    // Wait for video to be ready (up to 500ms with 5 retries at 100ms each)
+    for (let i = 0; i < maxRetries; i++) {
+      if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+        break;
+      }
+      console.log(`⏳ Waiting for video... attempt ${i + 1}/${maxRetries}, readyState = ${videoElement.readyState}`);
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    if (videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) {
+      console.warn('⚠️ captureVideoFrame: video never became ready after retries, readyState =', videoElement.readyState,
+        '(need HAVE_ENOUGH_DATA = 4)');
       return null;
     }
 
@@ -66,12 +82,13 @@ function CameraRecorder() {
       const scale = Math.min(1, maxWidth / videoElement.videoWidth);
       canvas.width = videoElement.videoWidth * scale;
       canvas.height = videoElement.videoHeight * scale;
-      
+
       const ctx = canvas.getContext('2d');
       ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-      
+
       // Use image/jpeg with 0.7 quality for much better compression than PNG
       const imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      console.log('✅ captureVideoFrame: Successfully captured frame');
       return imageDataUrl;
     } catch (error) {
       console.error('Error capturing video frame:', error);
@@ -173,16 +190,19 @@ function CameraRecorder() {
     }
   };
 
-  // Send screenshots to Gemini API via server
-  const sendScreenshotsToGemini = async (screenshots) => {
-    // Don't send if we already have a generated headshot
-    if (generatedImage || headshotGeneratedRef.current || headshotRequestInFlightRef.current) {
-      console.log('Headshot already generated, skipping...');
+  // Send screenshots to Gemini API via server (direct version without guard)
+  const sendScreenshotsToGeminiDirect = async (screenshots) => {
+    // CRITICAL: Capture sessionId at the START of this function
+    // This prevents race conditions where user clicks Stop and clears the ref
+    const capturedSessionId = currentSessionIdRef.current;
+
+    console.log('🎨 sendScreenshotsToGeminiDirect called with', screenshots.length, 'screenshots');
+
+    if (!capturedSessionId) {
+      console.warn('⚠️ No session ID available for headshot generation');
       return;
     }
-    headshotGeneratedRef.current = true;
-    headshotRequestInFlightRef.current = true;
-    
+
     // Generate headshot in the background while streams continue
     setResults(prev => [...prev, {
       text: '🧠 Generating headshot in background...',
@@ -190,28 +210,39 @@ function CameraRecorder() {
       inferenceLatency: null,
       totalLatency: null
     }]);
-    
+
     setIsGenerating(true);
+    console.log('🎨 HEADSHOT GENERATION: Starting...');
+    console.log('  Session ID:', capturedSessionId);
+    console.log('  Screenshots:', screenshots.length, 'images');
     try {
       const response = await fetch('/api/generate-headshot', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           screenshots,
-          sessionId: currentSessionIdRef.current 
+          sessionId: capturedSessionId
         })
       });
 
+      console.log('🎨 HEADSHOT GENERATION: Response status:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('❌ HEADSHOT GENERATION FAILED:', errorData);
         throw new Error(errorData.error || 'Failed to generate headshot');
       }
 
       const result = await response.json();
-      
+      console.log('🎨 HEADSHOT GENERATION: Result received');
+      console.log('  Has image:', !!result.image);
+      console.log('  Has text:', !!result.text);
+
       if (result.image) {
+        console.log('✅ HEADSHOT GENERATED SUCCESSFULLY!');
+        headshotGeneratedRef.current = true; // Mark as generated on SUCCESS
         setGeneratedImage(result.image);
         setResults(prev => [...prev, {
           text: '✅ Headshot generated successfully!',
@@ -219,7 +250,7 @@ function CameraRecorder() {
           inferenceLatency: null,
           totalLatency: null
         }]);
-        
+
         // Camera is already stopped, just confirm completion
         setResults(prev => [...prev, {
           text: '✅ Headshot generation complete!',
@@ -419,9 +450,10 @@ function CameraRecorder() {
         }
       });
 
-      // Get camera and microphone stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+      // Get AUDIO ONLY stream first - let Overshoot SDK own the camera
+      // This avoids camera conflicts on mobile devices
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        video: false, // Don't request video - let SDK handle it
         audio: {
           sampleRate: 16000,
           channelCount: 1,
@@ -429,21 +461,37 @@ function CameraRecorder() {
           noiseSuppression: true
         }
       });
-      
-      // Show video preview
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+
+      // Store audio stream reference (video will be set by SDK's internal stream)
+      streamRef.current = audioStream;
+
+      // Start audio recording via session socket
+      await startAudioRecording(audioStream);
+
+      // Initialize Overshoot SDK - it will own the camera stream
+      const overshootApiKey = (process.env.REACT_APP_OVERSHOOT_API_KEY || 'your-api-key').replace(/^["']|["']$/g, '');
+      console.log('🔧 Overshoot SDK Init:', {
+        apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
+        apiKeyPresent: !!overshootApiKey && overshootApiKey !== 'your-api-key',
+        apiKeyPrefix: overshootApiKey?.substring(0, 10) + '...',
+        apiKeyLength: overshootApiKey?.length
+      });
+
+      // Test Overshoot API connectivity before starting
+      console.log('🔌 Testing Overshoot API connectivity...');
+      try {
+        const testResponse = await fetch('https://cluster1.overshoot.ai/api/v0.2', {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${overshootApiKey}` }
+        });
+        console.log('🔌 Overshoot API test response:', testResponse.status, testResponse.statusText);
+      } catch (testError) {
+        console.warn('🔌 Overshoot API test failed (may be expected):', testError.message);
       }
-      streamRef.current = stream;
 
-      // Start audio recording via session socket (single socket for everything)
-      await startAudioRecording(stream);
-
-      // Initialize Overshoot SDK
       const vision = new RealtimeVision({
         apiUrl: 'https://cluster1.overshoot.ai/api/v0.2',
-        apiKey: (process.env.REACT_APP_OVERSHOOT_API_KEY || 'your-api-key').replace(/^["']|["']$/g, ''),
+        apiKey: overshootApiKey,
         prompt: `Analyze the current frame.
            1. First, determine if a human face is clearly visible. Set "face_detected" to true or false.
            2. If true, generate a compact "appearance_profile" merging clothing, style, and facial features (e.g., "Silver blazer, graphic tee, scar on left eyebrow, square glasses").
@@ -456,37 +504,67 @@ function CameraRecorder() {
                 type: "boolean",
                 description: "True if a human face is clearly visible in the frame, otherwise false."
               },
-              appearance_profile: { 
-                type: "string", 
-                description: "A compact fusion of clothing, accessories, and key facial features. Empty if no face detected." 
+              appearance_profile: {
+                type: "string",
+                description: "A compact fusion of clothing, accessories, and key facial features. Empty if no face detected."
               },
-              environment_context: { 
-                type: "string", 
-                description: "Brief context of the surroundings. Empty if no face detected." 
+              environment_context: {
+                type: "string",
+                description: "Brief context of the surroundings. Empty if no face detected."
               }
             },
             required: ["face_detected", "appearance_profile", "environment_context"]
           },
         source: { type: 'camera', cameraFacing: 'environment' },
         processing: {
-            clip_length_seconds: 1,
-            delay_seconds: 1,
-            fps: 30,
-            sampling_ratio: 0.1
+            clip_length_seconds: 2,  // Increased from 1 to give more time for detection
+            delay_seconds: 2,         // Increased from 1 to reduce API load
+            fps: 15,                  // Reduced from 30 - 15fps is sufficient for face detection
+            sampling_ratio: 0.2       // Increased from 0.1 - sample more frames
           },
+        onError: (error) => {
+          console.error('❌ Overshoot SDK Error:', error);
+          console.error('  Error type:', typeof error);
+          console.error('  Error keys:', error ? Object.keys(error) : 'null');
+          setResults(prev => [...prev, {
+            text: `❌ Overshoot error: ${error?.message || error?.error || JSON.stringify(error)}`,
+            timestamp: new Date().toLocaleTimeString(),
+            inferenceLatency: null,
+            totalLatency: null
+          }]);
+        },
         onResult: (result) => {
+          console.log('✅ Overshoot onResult received:', result);
           // Send visual data to session WebSocket
           if (sessionSocketRef.current && sessionSocketRef.current.connected) {
             sessionSocketRef.current.emit('session:visual', result);
           }
           
           // Parse the result - it should match the outputSchema structure
-          const parsedResult = typeof result.result === 'string' 
-            ? JSON.parse(result.result) 
+          const parsedResult = typeof result.result === 'string'
+            ? JSON.parse(result.result)
             : result.result;
-          
+
+          // ========== VISUAL PIPELINE LOGGING ==========
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.log('👁️ OVERSHOOT FRAME ANALYZED');
+          console.log('  Face Detected:', parsedResult?.face_detected ? '✅ YES' : '❌ NO');
+          if (parsedResult?.face_detected) {
+            console.log('  Appearance:', parsedResult?.appearance_profile || 'N/A');
+            console.log('  Environment:', parsedResult?.environment_context || 'N/A');
+          }
+          console.log('  Latency:', result.inference_latency_ms, 'ms');
+
           // Check if face is detected and capture screenshot
           // Stop collecting if we already have a generated headshot
+          console.log('📸 SCREENSHOT STATUS:');
+          console.log('  Can capture:', !generatedImage && !isGenerating && !headshotRequestInFlightRef.current && !headshotGeneratedRef.current ? '✅ YES' : '❌ NO');
+          console.log('  Already have headshot:', generatedImage ? '✅' : '❌');
+          console.log('  Currently generating:', isGenerating ? '✅' : '❌');
+          console.log('  Request in flight:', headshotRequestInFlightRef.current ? '✅' : '❌');
+          console.log('  Video ready:', videoRef.current?.readyState === 4 ? '✅' : '❌');
+          console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
           if (
             parsedResult &&
             parsedResult.face_detected === true &&
@@ -495,35 +573,59 @@ function CameraRecorder() {
             !headshotRequestInFlightRef.current &&
             !headshotGeneratedRef.current
           ) {
-            const screenshotDataUrl = captureVideoFrame(videoRef.current);
-            if (screenshotDataUrl) {
-              // Add screenshot capture notification to results
-              setResults(prev => [...prev, {
-                text: '📸 Screenshot captured - Face detected',
-                timestamp: new Date().toLocaleTimeString(),
-                inferenceLatency: result.inference_latency_ms,
-                totalLatency: result.total_latency_ms
-              }]);
+            // Use async IIFE to handle the async captureVideoFrame
+            (async () => {
+              console.log('📷 CAPTURING SCREENSHOT...');
+              const screenshotDataUrl = await captureVideoFrame(videoRef.current);
+              if (screenshotDataUrl) {
+                console.log('✅ SCREENSHOT CAPTURED! Size:', Math.round(screenshotDataUrl.length / 1024), 'KB');
+                // Add screenshot capture notification to results
+                setResults(prev => [...prev, {
+                  text: '📸 Screenshot captured - Face detected',
+                  timestamp: new Date().toLocaleTimeString(),
+                  inferenceLatency: result.inference_latency_ms,
+                  totalLatency: result.total_latency_ms
+                }]);
 
-              // Add to buffer
-              setScreenshotBuffer(prev => {
-                const newBuffer = [...prev, screenshotDataUrl];
-                
-                // If we have 2 screenshots, send to Gemini
-                if (newBuffer.length >= 2) {
-                  setResults(prevResults => [...prevResults, {
-                    text: '🔄 Sending 2 screenshots to Gemini for headshot generation...',
-                    timestamp: new Date().toLocaleTimeString(),
-                    inferenceLatency: null,
-                    totalLatency: null
-                  }]);
-                  sendScreenshotsToGemini(newBuffer.slice(0, 2));
-                  return []; // Clear buffer after sending
-                }
-                
-                return newBuffer;
-              });
-            }
+                // Add to buffer
+                setScreenshotBuffer(prev => {
+                  const newBuffer = [...prev, screenshotDataUrl];
+                  console.log('📦 Screenshot buffer:', newBuffer.length, '/ 2 needed');
+
+                  // If we have 2 screenshots, send to Gemini
+                  if (newBuffer.length >= 2) {
+                    console.log('🚀 SENDING 2 SCREENSHOTS FOR HEADSHOT GENERATION...');
+                    // Set flag to prevent MORE screenshots, but NOT headshotGeneratedRef
+                    // (that's set inside sendScreenshotsToGemini on success)
+                    headshotRequestInFlightRef.current = true;
+
+                    setResults(prevResults => [...prevResults, {
+                      text: '🔄 Sending 2 screenshots for headshot generation...',
+                      timestamp: new Date().toLocaleTimeString(),
+                      inferenceLatency: null,
+                      totalLatency: null
+                    }]);
+
+                    // Call directly without pre-setting headshotGeneratedRef
+                    // The function handles its own flag management
+                    const screenshotsToSend = newBuffer.slice(0, 2);
+                    (async () => {
+                      try {
+                        await sendScreenshotsToGeminiDirect(screenshotsToSend);
+                      } catch (err) {
+                        console.error('Headshot generation failed:', err);
+                        headshotRequestInFlightRef.current = false;
+                      }
+                    })();
+                    return []; // Clear buffer after sending
+                  }
+
+                  return newBuffer;
+                });
+              } else {
+                console.warn('⚠️ Failed to capture screenshot - captureVideoFrame returned null');
+              }
+            })();
           }
           
           setResults(prev => [...prev, {
@@ -537,6 +639,36 @@ function CameraRecorder() {
 
       visionRef.current = vision;
       await vision.start();
+      console.log('✅ Overshoot SDK started successfully');
+
+      // Now get video stream for preview AFTER SDK has started
+      // This allows both to share the camera since SDK grabbed it first
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false // Audio already handled above
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = videoStream;
+          videoRef.current.play();
+          console.log('✅ Video preview stream attached');
+        }
+
+        // Store video stream for cleanup (add to existing audio stream ref)
+        // We'll need to stop both streams on cleanup
+        streamRef.current = {
+          audioStream: streamRef.current,
+          videoStream: videoStream,
+          getTracks: () => [
+            ...(streamRef.current?.audioStream?.getTracks?.() || streamRef.current?.getTracks?.() || []),
+            ...videoStream.getTracks()
+          ]
+        };
+      } catch (videoError) {
+        console.warn('⚠️ Could not get video preview stream:', videoError.message);
+        // Continue without preview - SDK still works
+      }
     } catch (error) {
       console.error('Error starting vision:', error);
       setIsRunning(false); // Reset on error
@@ -548,7 +680,35 @@ function CameraRecorder() {
     try {
       // Stop audio recording first
       stopAudioRecording();
-      
+
+      // CRITICAL: Wait for any pending headshot request to complete before ending session
+      // This prevents the race condition where session ends before headshot is stored
+      if (headshotRequestInFlightRef.current) {
+        console.log('⏳ Waiting for headshot generation to complete before ending session...');
+        setResults(prev => [...prev, {
+          text: '⏳ Waiting for headshot to complete...',
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+
+        // Wait up to 60 seconds for headshot to complete
+        const maxWaitTime = 60000;
+        const checkInterval = 500;
+        let waitedTime = 0;
+
+        while (headshotRequestInFlightRef.current && waitedTime < maxWaitTime) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval));
+          waitedTime += checkInterval;
+        }
+
+        if (headshotRequestInFlightRef.current) {
+          console.log('⚠️ Headshot generation timed out, proceeding with session end');
+        } else {
+          console.log('✅ Headshot generation completed, proceeding with session end');
+        }
+      }
+
       // End session
       if (sessionSocketRef.current && sessionSocketRef.current.connected) {
         sessionSocketRef.current.emit('session:end');
@@ -566,9 +726,19 @@ function CameraRecorder() {
         visionRef.current = null;
       }
       
-      // Stop camera stream
+      // Stop camera and audio streams
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        // Handle both old format (MediaStream) and new format (object with audioStream/videoStream)
+        if (streamRef.current.audioStream) {
+          streamRef.current.audioStream.getTracks?.().forEach(track => track.stop());
+        }
+        if (streamRef.current.videoStream) {
+          streamRef.current.videoStream.getTracks?.().forEach(track => track.stop());
+        }
+        // Fallback for direct MediaStream
+        if (typeof streamRef.current.getTracks === 'function' && !streamRef.current.audioStream) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        }
         streamRef.current = null;
       }
       
