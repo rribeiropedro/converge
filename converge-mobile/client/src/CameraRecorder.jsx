@@ -415,7 +415,7 @@ function CameraRecorder() {
         userId: userId, // Get from authenticated user
         context: {
           event: { name: 'NexHacks 2026', type: 'hackathon' },
-          location: { name: 'Test Location', city: 'San Francisco' }
+          location: { name: 'Jared L. Cohon University Center', city: 'Pittsburgh, PA' }
         }
       });
 

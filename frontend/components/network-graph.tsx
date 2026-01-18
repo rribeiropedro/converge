@@ -509,12 +509,12 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode, grou
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <MapPin className="h-3 w-3 flex-shrink-0" />
-                <span>{tooltip.connection.location}</span>
+                <span>{tooltip.connection.location || 'Pittsburgh, PA'}</span>
               </div>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Calendar className="h-3 w-3 flex-shrink-0" />
                 <span>
-                  Met at {tooltip.connection.event || "networking event"} on{" "}
+                  Met at {tooltip.connection.event || "NexHacks"} on{" "}
                   {new Date(tooltip.connection.metDate).toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",
