@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
@@ -84,6 +85,14 @@
   --sidebar-accent-foreground: rgba(255, 255, 255, 0.9);
   --sidebar-border: rgba(255, 255, 255, 0.06);
   --sidebar-ring: #529CCA;
+
+  /* Converge landing page */
+  --brand: #00d4ff;
+  --dark-bg: #050505;
+  --dark-card: #0f0f0f;
+  --text-primary: #f2f2f2;
+  --text-secondary: #9a9a9a;
+  --dark-border: rgba(255, 255, 255, 0.08);
 }
 
 @theme inline {
@@ -127,6 +136,15 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-primary: "Playfair Display", serif;
+  --font-secondary: "Inter", sans-serif;
+  --color-brand: var(--brand);
+  --color-dark-bg: var(--dark-bg);
+  --color-dark-card: var(--dark-card);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-dark-border: var(--dark-border);
 }
 
 @layer base {
@@ -136,6 +154,55 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(40px);
+  transition: all 1s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.reveal.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes msgPop {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-anim {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.reveal.active .msg-a1 {
+  animation: msgPop 0.5s forwards 0.5s;
+}
+
+.reveal.active .msg-a2 {
+  animation: msgPop 0.5s forwards 1.2s;
+}
+
+.reveal.active .msg-a3 {
+  animation: msgPop 0.5s forwards 1.9s;
+}
+
+@keyframes pulseSlow {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 6s ease-in-out infinite;
 }
 
 /* Notion-style focus states */

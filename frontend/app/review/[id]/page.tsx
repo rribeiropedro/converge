@@ -258,21 +258,48 @@ export default function ReviewPage({ params }: ReviewPageProps) {
                   </div>
 
                   <div className="flex items-center gap-3 text-sm text-muted-foreground mb-2">
-                    {connection.company && (
-                      <div className="flex items-center gap-1">
-                        <Building2 className="h-3.5 w-3.5" />
-                        <span>{connection.company}</span>
-                        <ConfidenceBadge confidence={connection.companyConfidence} small />
-                      </div>
-                    )}
-                    {connection.role && (
-                      <div className="flex items-center gap-1">
-                        <User className="h-3.5 w-3.5" />
-                        <span>{connection.role}</span>
-                        {connection.roleConfidence && (
-                          <ConfidenceBadge confidence={connection.roleConfidence} small />
+                    {connection.isStudent ? (
+                      <>
+                        {connection.institution && (
+                          <div className="flex items-center gap-1">
+                            <Building2 className="h-3.5 w-3.5" />
+                            <span>{connection.institution}</span>
+                            {connection.institutionConfidence && (
+                              <ConfidenceBadge confidence={connection.institutionConfidence} small />
+                            )}
+                          </div>
                         )}
-                      </div>
+                        {connection.major && (
+                          <div className="flex items-center gap-1">
+                            <User className="h-3.5 w-3.5" />
+                            <span>{connection.major}</span>
+                            {connection.majorConfidence && (
+                              <ConfidenceBadge confidence={connection.majorConfidence} small />
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {connection.company && (
+                          <div className="flex items-center gap-1">
+                            <Building2 className="h-3.5 w-3.5" />
+                            <span>{connection.company}</span>
+                            {connection.companyConfidence && (
+                              <ConfidenceBadge confidence={connection.companyConfidence} small />
+                            )}
+                          </div>
+                        )}
+                        {connection.role && (
+                          <div className="flex items-center gap-1">
+                            <User className="h-3.5 w-3.5" />
+                            <span>{connection.role}</span>
+                            {connection.roleConfidence && (
+                              <ConfidenceBadge confidence={connection.roleConfidence} small />
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </>

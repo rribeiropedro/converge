@@ -4,11 +4,15 @@ import transcribeRoutes from './transcribeRoutes.js';
 
 import connectionRoutes from './connectionRoutes.js';
 import overshootRoutes from './overshootRoutes.js';
+import livekitRoutes from './livekitRoutes.js';
+import analyticsRoutes from './analyticsRoutes.js';
 const router = express.Router();
 
 router.use('/users', userRoutes);
 router.use('/transcribe', transcribeRoutes);
 router.use('/connections', connectionRoutes);
+router.use('/livekit', livekitRoutes);
+router.use('/analytics', analyticsRoutes);
 router.use('/', overshootRoutes);
 
 router.get('/', (req, res) => {
@@ -19,8 +23,10 @@ router.get('/', (req, res) => {
       users: '/api/users',
       transcribe: '/api/transcribe',
       connections: '/api/connections',
+      analytics: '/api/analytics',
       overshoot: '/api/overshoot-result',
       headshot: '/api/generate-headshot',
+      livekit: '/api/livekit/token',
       health: '/health'
     }
   });
