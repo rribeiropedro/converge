@@ -1,7 +1,7 @@
 {
   "name": "converge-backend",
   "version": "1.0.0",
-  "description": "Express.js backend with MongoDB",
+  "description": "Converge Express.js backend with Overshoot Vision & OpenRouter integration",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
