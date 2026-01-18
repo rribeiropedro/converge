@@ -4,7 +4,7 @@ import React from "react"
 import { AppShell } from "@/components/app-shell"
 import { ProtectedRoute } from "@/components/protected-route"
 
-export default function DashboardLayout({
+export default function ConnectionsLayout({
   children,
 }: {
   children: React.ReactNode
