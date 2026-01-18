@@ -7,6 +7,9 @@ export interface Connection {
   metDate: string
   summaryPlaceholder: string
   tags: string[]
+  role?: string
+  company?: string
+  event?: string
 }
 
 export interface Edge {
@@ -24,7 +27,10 @@ export const connections: Connection[] = [
     industry: "Fintech",
     metDate: "2025-12-15",
     summaryPlaceholder: "Met at TechCrunch Disrupt. Discussed AI in banking.",
-    tags: ["investor", "AI"]
+    tags: ["investor", "AI"],
+    role: "VP of Product",
+    company: "Stripe",
+    event: "TechCrunch Disrupt 2025"
   },
   {
     id: "2",
@@ -34,7 +40,10 @@ export const connections: Connection[] = [
     industry: "Healthcare",
     metDate: "2025-11-20",
     summaryPlaceholder: "Connected at health innovation summit.",
-    tags: ["founder", "healthcare"]
+    tags: ["founder", "healthcare"],
+    role: "CEO",
+    company: "HealthTech Labs",
+    event: "Health Innovation Summit"
   },
   {
     id: "3",
@@ -44,7 +53,10 @@ export const connections: Connection[] = [
     industry: "Biotech",
     metDate: "2025-10-05",
     summaryPlaceholder: "Research collaboration discussion at MIT event.",
-    tags: ["researcher", "biotech"]
+    tags: ["researcher", "biotech"],
+    role: "Research Scientist",
+    company: "MIT Labs",
+    event: "MIT Biotech Conference"
   },
   {
     id: "4",
@@ -54,7 +66,10 @@ export const connections: Connection[] = [
     industry: "Cloud Computing",
     metDate: "2025-09-18",
     summaryPlaceholder: "AWS re:Invent networking dinner.",
-    tags: ["engineer", "cloud"]
+    tags: ["engineer", "cloud"],
+    role: "Senior Engineer",
+    company: "Amazon Web Services",
+    event: "AWS re:Invent 2025"
   },
   {
     id: "5",
@@ -64,7 +79,10 @@ export const connections: Connection[] = [
     industry: "E-commerce",
     metDate: "2025-08-22",
     summaryPlaceholder: "SXSW panel on future of retail.",
-    tags: ["marketing", "retail"]
+    tags: ["marketing", "retail"],
+    role: "Head of Marketing",
+    company: "Shopify",
+    event: "SXSW 2025"
   },
   {
     id: "6",
@@ -74,7 +92,10 @@ export const connections: Connection[] = [
     industry: "Manufacturing",
     metDate: "2025-07-10",
     summaryPlaceholder: "Industry 4.0 conference introduction.",
-    tags: ["operations", "manufacturing"]
+    tags: ["operations", "manufacturing"],
+    role: "COO",
+    company: "Industrial IoT Co",
+    event: "Industry 4.0 Conference"
   },
   {
     id: "7",
@@ -84,7 +105,10 @@ export const connections: Connection[] = [
     industry: "AI/ML",
     metDate: "2026-01-05",
     summaryPlaceholder: "AI Summit keynote speaker, discussed LLMs.",
-    tags: ["AI", "researcher"]
+    tags: ["AI", "researcher"],
+    role: "AI Researcher",
+    company: "OpenAI",
+    event: "AI Summit 2026"
   },
   {
     id: "8",
@@ -94,7 +118,10 @@ export const connections: Connection[] = [
     industry: "Clean Energy",
     metDate: "2025-06-15",
     summaryPlaceholder: "Climate tech meetup organizer.",
-    tags: ["sustainability", "energy"]
+    tags: ["sustainability", "energy"],
+    role: "Founder",
+    company: "SolarNext",
+    event: "Climate Tech Meetup"
   },
   {
     id: "9",
@@ -104,7 +131,10 @@ export const connections: Connection[] = [
     industry: "Entertainment",
     metDate: "2025-12-01",
     summaryPlaceholder: "Streaming platform product lead.",
-    tags: ["product", "media"]
+    tags: ["product", "media"],
+    role: "Product Manager",
+    company: "Netflix",
+    event: "Content Summit LA"
   },
   {
     id: "10",
@@ -114,7 +144,10 @@ export const connections: Connection[] = [
     industry: "Fintech",
     metDate: "2025-11-08",
     summaryPlaceholder: "Venture capital partner at seed fund.",
-    tags: ["investor", "VC"]
+    tags: ["investor", "VC"],
+    role: "Partner",
+    company: "Sequoia Capital",
+    event: "FinTech Forum Boston"
   }
 ]
 

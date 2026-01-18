@@ -3,19 +3,39 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Mic, Settings, ChevronRight, ChevronLeft, LogOut } from "lucide-react"
+import { LayoutDashboard, Mic, Settings, ChevronRight, ChevronLeft, LogOut, Users, ClipboardCheck, BarChart3 } from "lucide-react"
 import { logoutFromAPI, getUser, type User } from "@/lib/auth"
 import { useState, useEffect } from "react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import { getConnectionCounts, ApiError } from "@/lib/api"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
 
-const navItems = [
+interface NavItem {
+  label: string
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+  disabled?: boolean
+  badge?: number
+  badgeColor?: string
+}
+
+const staticNavItems: NavItem[] = [
   {
     label: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    label: "Connections",
+    href: "/connections",
+    icon: Users,
+  },
+  {
+    label: "Analytics",
+    href: "/dashboard/analytics",
+    icon: BarChart3,
   },
   {
     label: "Voice Agent",
@@ -44,11 +64,49 @@ function SidebarNavContent({ onLinkClick, onCollapse, showCollapseButton }: {
   const router = useRouter()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [user, setUser] = useState<User | null>(null)
+  const [draftCount, setDraftCount] = useState(0)
 
   // Only read from localStorage on client side after hydration
   useEffect(() => {
     setUser(getUser())
   }, [])
+
+  // Fetch draft count for badge
+  useEffect(() => {
+    async function fetchDraftCount() {
+      try {
+        const counts = await getConnectionCounts()
+        setDraftCount(counts.draft)
+      } catch (err) {
+        // Silently fail - badge just won't show
+        console.error('Failed to fetch draft count:', err)
+      }
+    }
+    fetchDraftCount()
+  }, [])
+
+  // Build nav items with dynamic badges
+  const navItems: NavItem[] = staticNavItems.map(item => {
+    if (item.href === '/connections' && draftCount > 0) {
+      return { ...item, badge: draftCount, badgeColor: 'bg-yellow-500' }
+    }
+    return item
+  })
+
+  // Add Review item if there are drafts
+  const allNavItems = draftCount > 0
+    ? [
+        ...navItems.slice(0, 2),
+        {
+          label: "Review Drafts",
+          href: "/connections?status=draft",
+          icon: ClipboardCheck,
+          badge: draftCount,
+          badgeColor: 'bg-yellow-500',
+        } as NavItem,
+        ...navItems.slice(2),
+      ]
+    : navItems
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
@@ -80,10 +138,10 @@ function SidebarNavContent({ onLinkClick, onCollapse, showCollapseButton }: {
       {/* Navigation - Notion style with subtle hover */}
       <nav className="flex-1 p-1.5">
         <div className="space-y-0.5">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+          {allNavItems.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href.split('?')[0] + "/")
             const Icon = item.icon
-            
+
             return (
               <Link
                 key={item.href}
@@ -100,6 +158,14 @@ function SidebarNavContent({ onLinkClick, onCollapse, showCollapseButton }: {
               >
                 <Icon className="h-4 w-4 flex-shrink-0" />
                 <span className="truncate">{item.label}</span>
+                {item.badge && item.badge > 0 && (
+                  <span className={cn(
+                    "ml-auto text-[10px] text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
+                    item.badgeColor || "bg-primary"
+                  )}>
+                    {item.badge}
+                  </span>
+                )}
                 {item.disabled && (
                   <span className="ml-auto text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Soon</span>
                 )}

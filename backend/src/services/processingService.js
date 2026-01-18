@@ -131,18 +131,67 @@ export async function addInteractionToExistingConnection(connectionId, audioData
   connection.last_interaction = new Date();
   connection.interaction_count += 1;
 
+  // Track which profile fields changed (value or significant confidence improvement)
+  const changedFields = [];
   const confidenceOrder = { 'low': 1, 'medium': 2, 'high': 3 };
+  
   ['name', 'company', 'role'].forEach(field => {
     const currentField = connection[field];
     const newField = audioData.profile?.[field];
-    if (newField?.value && (!currentField?.value || confidenceOrder[newField.confidence] > confidenceOrder[currentField.confidence])) {
-      connection[field] = { ...newField, source: 'livekit' };
+    
+    if (newField?.value) {
+      const currentValue = currentField?.value;
+      const currentConfidence = currentField?.confidence || 'low';
+      const newValue = newField.value;
+      const newConfidence = newField.confidence;
+      
+      // Determine if we should update the field
+      const shouldUpdate = !currentValue || 
+                          currentValue !== newValue ||
+                          confidenceOrder[newConfidence] > confidenceOrder[currentConfidence];
+      
+      if (shouldUpdate) {
+        // Update the field
+        connection[field] = { ...newField, source: 'livekit' };
+        
+        // Track as changed if:
+        // 1. Value actually changed (different text)
+        // 2. Field was empty and now has a value
+        // 3. Confidence improved significantly (low->high or medium->high) even with same value
+        const valueChanged = !currentValue || currentValue !== newValue;
+        const confidenceImprovedSignificantly = 
+          currentValue === newValue && 
+          confidenceOrder[newConfidence] >= 2 && 
+          confidenceOrder[newConfidence] > confidenceOrder[currentConfidence];
+        
+        if (valueChanged || confidenceImprovedSignificantly) {
+          changedFields.push(field);
+        }
+      }
     }
   });
 
+  // Calculate review flags
   const combinedAudioData = { profile: { name: connection.name, company: connection.company, role: connection.role } };
-  connection.needs_review = calculateNeedsReview(combinedAudioData);
-  connection.fields_needing_review = getFieldsNeedingReview(combinedAudioData);
+  const calculatedNeedsReview = calculateNeedsReview(combinedAudioData);
+  const calculatedFieldsNeedingReview = getFieldsNeedingReview(combinedAudioData);
+  
+  // If profile fields changed, mark for review and set status to draft
+  if (changedFields.length > 0) {
+    connection.needs_review = true;
+    // Combine changed fields with fields needing review (deduplicate)
+    connection.fields_needing_review = Array.from(new Set([...changedFields, ...calculatedFieldsNeedingReview]));
+    
+    // Set status to draft so it appears in review queue
+    // User will need to approve again to confirm the changes
+    if (connection.status === 'approved') {
+      connection.status = 'draft';
+    }
+  } else {
+    // No profile changes, just use calculated review flags
+    connection.needs_review = calculatedNeedsReview;
+    connection.fields_needing_review = calculatedFieldsNeedingReview;
+  }
 
   await connection.save();
 
@@ -207,7 +256,11 @@ export async function getConnections(userId, options = {}) {
     connectionsQuery = Connection.find({ ...query, $text: { $search: search } });
   }
 
-  const connections = await connectionsQuery.sort({ 'context.first_met': -1 }).skip(offset).limit(limit);
+  // Sort by updated_at (most recent first) for drafts, otherwise by first_met
+  // This ensures recently added/updated drafts appear first
+  const sortField = status === 'draft' ? { updated_at: -1 } : { 'context.first_met': -1 };
+  
+  const connections = await connectionsQuery.sort(sortField).skip(offset).limit(limit);
   const total = await Connection.countDocuments(query);
   return { connections, total, limit, offset };
 }
