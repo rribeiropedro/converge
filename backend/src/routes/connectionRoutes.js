@@ -8,7 +8,7 @@ import {
   getById,
   approve,
   remove,
-  testFaceRecognition
+  testAppearanceMatching
 } from '../controllers/connectionController.js';
 import auth from '../middleware/auth.js';
 
@@ -24,7 +24,7 @@ router.get('/:id', auth, getById);
 router.patch('/:id/approve', auth, approve);
 router.delete('/:id', auth, remove);
 
-// Test endpoint for face recognition (no auth required for testing)
-router.post('/test-face', testFaceRecognition);
+// Test endpoint for appearance matching (no auth required for testing)
+router.post('/test-appearance', testAppearanceMatching);
 
 export default router;
