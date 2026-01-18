@@ -1,9 +1,9 @@
-/* Notion-style Auth Page */
+/* Notion-style Auth Page - Dark Mode */
 .auth-container {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: #191919;
 }
 
 /* Header - Notion style */
@@ -12,7 +12,8 @@
   display: flex;
   align-items: center;
   padding: 0 1rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: #191919;
 }
 
 .auth-header-logo {
@@ -26,7 +27,7 @@
 .logo-icon {
   width: 20px;
   height: 20px;
-  background: #000;
+  background: #667eea;
   border-radius: 4px;
   display: flex;
   align-items: center;
@@ -39,7 +40,7 @@
 .auth-header-title {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #1a1a1a;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 /* Main content area */
@@ -57,16 +58,17 @@
 }
 
 .auth-card-inner {
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   padding: 1.5rem;
-  background: #ffffff;
+  background: #2f2f2f;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 /* Tabs - Notion style segmented control */
 .auth-tabs {
   display: flex;
-  background: #f3f4f6;
+  background: rgba(255, 255, 255, 0.05);
   padding: 0.125rem;
   border-radius: 6px;
   margin-bottom: 1.5rem;
@@ -82,17 +84,18 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
-  color: #6b7280;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .auth-tab.active {
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .auth-tab:hover:not(.active) {
-  color: #111827;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* Title section */
@@ -103,14 +106,16 @@
 .auth-title h1 {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #111827;
-  margin: 0 0 0.25rem 0;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 0 0 0.5rem 0;
+  padding: 0;
 }
 
 .auth-subtitle {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: rgba(255, 255, 255, 0.5);
   margin: 0;
+  padding: 0;
 }
 
 /* Form styles */
@@ -128,30 +133,30 @@
 
 .form-group label {
   font-size: 0.875rem;
-  font-weight: 400;
-  color: #111827;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .form-group input {
   height: 36px;
   padding: 0 0.75rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
   font-size: 0.875rem;
-  background: #f9fafb;
+  background: rgba(255, 255, 255, 0.05);
   transition: all 0.15s;
-  color: #111827;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .form-group input::placeholder {
-  color: #9ca3af;
+  color: rgba(255, 255, 255, 0.3);
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #000;
-  box-shadow: 0 0 0 1px #000;
-  background: #ffffff;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .form-group input.error {
@@ -159,16 +164,16 @@
 }
 
 .form-group input:disabled {
-  background: #f3f4f6;
+  background: rgba(255, 255, 255, 0.03);
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 /* Error message */
 .error-message {
-  background: rgba(220, 38, 38, 0.1);
-  border: 1px solid rgba(220, 38, 38, 0.2);
-  color: #dc2626;
+  background: rgba(220, 38, 38, 0.15);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #ff6b6b;
   padding: 0.75rem;
   border-radius: 6px;
   font-size: 0.75rem;
@@ -177,7 +182,7 @@
 
 .form-group p {
   font-size: 0.75rem;
-  color: #dc2626;
+  color: #ff6b6b;
   margin: 0;
 }
 
@@ -187,21 +192,26 @@
   padding: 0 1rem;
   border: none;
   border-radius: 6px;
-  background: #000;
+  background: #667eea;
   color: #fff;
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
   margin-top: 0.5rem;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 .btn-submit:hover:not(:disabled) {
-  background: #1f2937;
+  background: #7a8cef;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
 .btn-submit:active:not(:disabled) {
-  background: #111827;
+  background: #5a6ed8;
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 .btn-submit:disabled {
@@ -214,14 +224,14 @@
   text-align: center;
   margin-top: 1.25rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .link-button {
   background: none;
   border: none;
-  color: #000;
-  font-weight: 400;
+  color: #8b9eff;
+  font-weight: 500;
   cursor: pointer;
   padding: 0;
   text-decoration: underline;
@@ -229,7 +239,7 @@
 }
 
 .link-button:hover {
-  color: #111827;
+  color: #a5b4ff;
 }
 
 /* Skip button */
@@ -238,18 +248,18 @@
   padding: 0.5rem;
   margin-top: 0.75rem;
   background: transparent;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 6px;
-  color: #6b7280;
+  color: rgba(255, 255, 255, 0.6);
   font-size: 0.75rem;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .skip-button:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
-  color: #111827;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* Responsive */
