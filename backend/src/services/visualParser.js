@@ -3,10 +3,11 @@ import { generateFaceEmbedding } from './faceEmbeddingService.js';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 async function callOpenRouter(prompt) {
+  const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY;
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.OPEN_ROUTER_API_KEY}`,
+      'Authorization': `Bearer ${openRouterApiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
