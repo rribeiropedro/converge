@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { connections } from "@/lib/data"
 import { ConnectionProfileCard, type MongoDBConnection } from "@/components/connection-profile-card"
 import { UISchemaInterpreter } from "@/components/ui-schema-interpreter"
-import { extractUISchemas, type UISchema } from "@/lib/ui-schema"
+import { type UISchema } from "@/lib/ui-schema"
 
 type AgentState = "idle" | "listening" | "responding" | "done"
 
@@ -199,22 +199,20 @@ export default function AgentPage() {
             
             if (isAgent) {
               // Agent transcription (what the agent is saying)
+              // UI schemas are now sent via DataReceived event, not in transcription
               setMessages(prev => {
                 // Remove any interim agent messages with the same segment ID
                 const filtered = prev.filter(m => 
                   !(m.type === 'agent' && m.segmentId === segmentId && m.isInterim)
                 )
                 
-                // Parse UI schemas from agent message
-                const { schemas, textWithoutSchemas } = extractUISchemas(message)
-                
                 return [...filtered, {
                   id: segmentId || Date.now().toString(),
                   type: "agent",
-                  content: textWithoutSchemas || message, // Use original if no schemas found
+                  content: message, // Just the spoken text
                   isInterim: !isFinal,
                   segmentId,
-                  uiSchemas: schemas.length > 0 ? schemas : undefined,
+                  // No uiSchemas here - they come via DataReceived
                 }]
               })
             } else {
@@ -254,15 +252,25 @@ export default function AgentPage() {
           }
         })
         
-        // Also listen for data messages (for profile data)
+        // Also listen for data messages (for UI schemas and profile data)
         room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant, kind?: any) => {
           try {
             const decoder = new TextDecoder()
             const data = JSON.parse(decoder.decode(payload))
             console.log('Data message received:', data)
             
-            // Handle profile data
-            if (data.type === 'profile_data' && data.profiles && Array.isArray(data.profiles)) {
+            // Handle UI schema data
+            if (data.type === 'ui_schema' && data.schema) {
+              const schemaMessage: Message = {
+                id: `schema-${Date.now()}`,
+                type: "agent",
+                content: "", // No text content - schema only
+                uiSchemas: [data.schema],
+              }
+              setMessages(prev => [...prev, schemaMessage])
+            }
+            // Keep existing profile_data handler for backwards compatibility
+            else if (data.type === 'profile_data' && data.profiles && Array.isArray(data.profiles)) {
               // Create profile messages for each profile
               data.profiles.forEach((profileData: MongoDBConnection, index: number) => {
                 const profileMessage: Message = {

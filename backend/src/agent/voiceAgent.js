@@ -96,19 +96,12 @@ function formatConnectionForProfileCard(connectionDoc) {
 function createTools(userId) {
   return {
     searchConnections: llm.tool({
-      description: `CRITICAL: You MUST use this tool for ANY question about connections or people.
+      description: `Search for connections and display their profile cards.
       
-      This tool returns:
-      - A brief SUMMARY (e.g., "I found 4 connections for you.")
-      - A UI_SCHEMA that renders beautiful profile cards showing ALL connection details
+      This tool automatically sends profile cards to the UI.
+      Return a brief summary to speak to the user.
       
-      USAGE PATTERN:
-      1. Call this tool
-      2. Say ONLY the summary returned by the tool
-      3. Include the ui_schema EXACTLY as returned
-      4. DO NOT describe individual connections - the cards show everything!
-      
-      Searches across names, companies, roles, industries, events, topics discussed, and any other text. 
+      Searches across names, companies, roles, industries, events, topics discussed, and any other text.
       
       Examples: "Find Sarah", "Who works at Google?", "People interested in AI", 
       "Who did I meet at NexHacks?", "Find investors", "Who have I met recently?", 
@@ -157,27 +150,37 @@ function createTools(userId) {
             .map(c => formatConnectionForProfileCard(c))
             .filter(p => p !== null);
           
-          // Create UI schema for profile cards
-          const uiSchema = {
-            type: 'profile_card_group',
-            data: formattedProfiles
-          };
+          // Send UI schema silently via data channel
+          if (formattedProfiles.length > 0) {
+            try {
+              const room = getJobContext().room;
+              const uiSchema = {
+                type: 'profile_card_group',
+                data: formattedProfiles
+              };
+              
+              const encoder = new TextEncoder();
+              const data = JSON.stringify({
+                type: 'ui_schema',
+                schema: uiSchema
+              });
+              
+              await room.localParticipant.publishData(
+                encoder.encode(data),
+                { reliable: true }
+              );
+            } catch (dataError) {
+              console.error('Error sending UI schema:', dataError);
+              // Don't fail the tool if data sending fails
+            }
+          }
           
-          // Return the UI schema wrapped in markdown code blocks
-          // The agent MUST include this in its response for the UI to render it
-          const uiSchemaString = '```ui-schema\n' + JSON.stringify(uiSchema, null, 2) + '\n```';
-          
-          // Minimal summary - let the UI cards show the details
+          // Return ONLY what should be spoken
           const summary = connections.length === 0 
             ? 'No connections found matching your query.'
             : `I found ${connections.length} connection${connections.length > 1 ? 's' : ''} for you.`;
           
-          // Return minimal summary and UI schema
-          return {
-            summary,
-            ui_schema: uiSchemaString,
-            instruction: 'IMPORTANT: Say ONLY the summary, then include the ui_schema. DO NOT describe the connections - the UI cards will show all details.'
-          };
+          return { summary };
         } catch (error) {
           return { error: 'Search failed', message: error.message };
         }
@@ -185,17 +188,10 @@ function createTools(userId) {
     }),
     
     getPersonDetails: llm.tool({
-      description: `CRITICAL: Use this tool when user asks about a specific person.
+      description: `Get details about a specific person and display their profile card.
       
-      This tool returns:
-      - A brief SUMMARY (e.g., "Here's Sarah's profile.")
-      - A UI_SCHEMA that renders a beautiful profile card showing ALL details
-      
-      USAGE PATTERN:
-      1. Call this tool
-      2. Say ONLY the summary returned by the tool
-      3. Include the ui_schema EXACTLY as returned
-      4. DO NOT describe the person - the card shows everything!
+      This tool automatically sends the profile card to the UI.
+      Return a brief summary to speak to the user.
       
       The profile card displays where you met, what you discussed, their challenges, 
       follow-up items, and all conversation context automatically.`,
@@ -235,25 +231,252 @@ function createTools(userId) {
           // Format profile data for UI schema
           const formattedProfile = formatConnectionForProfileCard(connection);
           
-          // Create UI schema for single profile card
-          const uiSchema = {
-            type: 'profile_card',
-            data: formattedProfile
-          };
+          // Send UI schema silently via data channel
+          try {
+            const room = getJobContext().room;
+            const uiSchema = {
+              type: 'profile_card',
+              data: formattedProfile
+            };
+            
+            const encoder = new TextEncoder();
+            const data = JSON.stringify({
+              type: 'ui_schema',
+              schema: uiSchema
+            });
+            
+            await room.localParticipant.publishData(
+              encoder.encode(data),
+              { reliable: true }
+            );
+          } catch (dataError) {
+            console.error('Error sending UI schema:', dataError);
+            // Don't fail the tool if data sending fails
+          }
           
-          // Return the UI schema wrapped in markdown code blocks
-          const uiSchemaString = '```ui-schema\n' + JSON.stringify(uiSchema, null, 2) + '\n```';
-          
-          // Minimal summary - let the UI card show all the details
-          const summary = `Here's ${connection.name.value}'s profile.`;
-          
+          // Return ONLY what should be spoken
           return {
-            summary,
-            ui_schema: uiSchemaString,
-            instruction: 'IMPORTANT: Say ONLY the summary, then include the ui_schema. DO NOT describe details - the UI card shows everything.'
+            summary: `Here's ${connection.name.value}'s profile.`,
+            found: true
           };
         } catch (error) {
           return { error: 'Failed to get person details', message: error.message };
+        }
+      },
+    }),
+    
+    filterConnections: llm.tool({
+      description: `Filter connections by time, location, event, tags, or other structured criteria.
+      
+      This tool automatically sends profile cards to the UI.
+      Return a brief summary to speak to the user.
+      
+      Use this for temporal or structured queries like:
+      - "Recent connections" or "Who have I met recently?"
+      - "Connections from the last 14 days"
+      - "People I met at [event name]"
+      - "Connections in [city]"
+      - "Show me people with tag [tag]"
+      - "Most frequent connections"
+      - "People I haven't talked to in a while"`,
+      parameters: {
+        type: 'object',
+        properties: {
+          metWithinDays: {
+            type: 'number',
+            description: 'Find connections you met within the last X days (e.g., 7 for last week, 30 for last month). Filters by first_met date.'
+          },
+          interactedWithinDays: {
+            type: 'number',
+            description: 'Find connections you interacted with in the last X days. Filters by last_interaction date.'
+          },
+          notInteractedInDays: {
+            type: 'number',
+            description: 'Find connections you HAVEN\'T interacted with in X days (for overdue follow-ups). Filters by last_interaction date.'
+          },
+          eventName: {
+            type: 'string',
+            description: 'Filter by event name (e.g., "NexHacks", "TechCrunch Disrupt")'
+          },
+          city: {
+            type: 'string',
+            description: 'Filter by city where you met (e.g., "San Francisco", "New York")'
+          },
+          industry: {
+            type: 'string',
+            description: 'Filter by industry (e.g., "technology", "healthcare", "finance")'
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Filter by tags (e.g., ["investor", "potential_client"])'
+          },
+          sortBy: {
+            type: 'string',
+            enum: ['recently_met', 'oldest_met', 'recently_interacted', 'most_interactions', 'least_interactions', 'name'],
+            description: 'How to sort results (default: recently_met)'
+          },
+          minInteractions: {
+            type: 'number',
+            description: 'Minimum number of interactions (for finding frequent contacts)'
+          },
+          maxInteractions: {
+            type: 'number',
+            description: 'Maximum number of interactions (for finding new/neglected connections)'
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum results to return (default: 5)'
+          }
+        }
+      },
+      execute: async ({ 
+        metWithinDays,
+        interactedWithinDays,
+        notInteractedInDays,
+        eventName, 
+        city, 
+        industry, 
+        tags, 
+        sortBy = 'recently_met', 
+        minInteractions,
+        maxInteractions,
+        limit = 5 
+      }, { ctx }) => {
+        try {
+          const filter = {
+            user_id: userId,
+            status: 'approved'
+          };
+          
+          // Time-based filtering: when they first met
+          if (metWithinDays !== undefined) {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - metWithinDays);
+            filter['context.first_met'] = { $gte: cutoffDate };
+          }
+          
+          // Time-based filtering: recent interactions
+          if (interactedWithinDays !== undefined) {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - interactedWithinDays);
+            filter['last_interaction'] = { $gte: cutoffDate };
+          }
+          
+          // Time-based filtering: overdue interactions
+          if (notInteractedInDays !== undefined) {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - notInteractedInDays);
+            filter.$or = [
+              { last_interaction: { $lte: cutoffDate } },
+              { last_interaction: null }
+            ];
+          }
+          
+          // Event filtering
+          if (eventName) {
+            filter['context.event.name'] = { $regex: eventName, $options: 'i' };
+          }
+          
+          // Location filtering
+          if (city) {
+            filter['context.location.city'] = { $regex: city, $options: 'i' };
+          }
+          
+          // Industry filtering
+          if (industry) {
+            filter['industry'] = { $regex: industry, $options: 'i' };
+          }
+          
+          // Tags filtering
+          if (tags && tags.length > 0) {
+            filter['tags'] = { $in: tags };
+          }
+          
+          // Interaction count filtering
+          if (minInteractions !== undefined) {
+            filter['interaction_count'] = { $gte: minInteractions };
+          }
+          
+          if (maxInteractions !== undefined) {
+            if (filter['interaction_count']) {
+              filter['interaction_count'] = { 
+                ...filter['interaction_count'],
+                $lte: maxInteractions 
+              };
+            } else {
+              filter['interaction_count'] = { $lte: maxInteractions };
+            }
+          }
+          
+          // Build sort criteria
+          let sortCriteria = {};
+          switch (sortBy) {
+            case 'recently_met':
+              sortCriteria = { 'context.first_met': -1 };
+              break;
+            case 'oldest_met':
+              sortCriteria = { 'context.first_met': 1 };
+              break;
+            case 'recently_interacted':
+              sortCriteria = { last_interaction: -1 };
+              break;
+            case 'most_interactions':
+              sortCriteria = { interaction_count: -1 };
+              break;
+            case 'least_interactions':
+              sortCriteria = { interaction_count: 1 };
+              break;
+            case 'name':
+              sortCriteria = { 'name.value': 1 };
+              break;
+            default:
+              sortCriteria = { 'context.first_met': -1 };
+          }
+          
+          // Execute query
+          const connections = await Connection.find(filter)
+            .limit(Math.min(limit, 20))
+            .sort(sortCriteria);
+          
+          // Format profile data for UI schema
+          const formattedProfiles = connections
+            .map(c => formatConnectionForProfileCard(c))
+            .filter(p => p !== null);
+          
+          // Send UI schema silently via data channel
+          if (formattedProfiles.length > 0) {
+            try {
+              const room = getJobContext().room;
+              const uiSchema = {
+                type: 'profile_card_group',
+                data: formattedProfiles
+              };
+              
+              const encoder = new TextEncoder();
+              const data = JSON.stringify({
+                type: 'ui_schema',
+                schema: uiSchema
+              });
+              
+              await room.localParticipant.publishData(
+                encoder.encode(data),
+                { reliable: true }
+              );
+            } catch (dataError) {
+              console.error('Error sending UI schema:', dataError);
+              // Don't fail the tool if data sending fails
+            }
+          }
+          
+          // Return ONLY what should be spoken
+          const summary = connections.length === 0 
+            ? 'No connections found matching those criteria.'
+            : `I found ${connections.length} connection${connections.length > 1 ? 's' : ''} for you.`;
+          
+          return { summary };
+        } catch (error) {
+          return { error: 'Filter failed', message: error.message };
         }
       },
     }),
@@ -339,31 +562,46 @@ class NetworkAssistant extends voice.Agent {
     super({
       instructions: `You are an intelligent network assistant helping users manage their professional connections.
 
-CRITICAL UI SCHEMA RULES:
-1. When user asks about connections/people, you MUST call searchConnections or getPersonDetails tools
-2. These tools return a "ui_schema" field containing a markdown code block
-3. You MUST include this EXACT ui_schema block in your spoken response
-4. The ui_schema will automatically render visual profile cards in the chat
-5. DO NOT verbally describe details that are shown in the UI cards - let the cards speak for themselves
+When users ask about connections or people:
+1. Choose the right tool:
+   - searchConnections: for TEXT queries (names, companies, topics, keywords)
+   - filterConnections: for TIME-BASED or STRUCTURED queries (recent, by date range, by event, by location, by tag, by interaction count)
+   - getPersonDetails: for specific person lookup
+   - getPendingActions: for tasks and follow-ups
+2. The tool will automatically display visual profile cards in the UI
+3. Say ONLY the summary returned by the tool
+4. Be brief and natural - the visual cards show all details
 
-RESPONSE PATTERN - KEEP IT MINIMAL:
-- Call the appropriate tool (searchConnections or getPersonDetails)
-- Say ONLY the summary provided by the tool (e.g., "I found 4 connections for you.")
-- Include the ui_schema EXACTLY as returned
-- DO NOT list names, companies, or other details - the UI cards show everything
-
-CORRECT EXAMPLES:
+Examples:
 User: "Who have I met recently?"
-Tool returns: { summary: "I found 4 connections for you.", ui_schema: "..." }
-Your response: "I found 4 connections for you. \`\`\`ui-schema\\n{...}\\n\`\`\`"
-❌ WRONG: "I found 4 connections: Sarah from Google, John from Microsoft..." (redundant!)
+→ Use filterConnections with metWithinDays: 7
+Tool returns: { summary: "I found 4 connections for you." }
+You say: "I found 4 connections for you."
 
-User: "Tell me about Sarah"  
-Tool returns: { summary: "Here's Sarah's profile.", ui_schema: "..." }
-Your response: "Here's Sarah's profile. \`\`\`ui-schema\\n{...}\\n\`\`\`"
-❌ WRONG: "Sarah works at TechCorp and you met her at..." (redundant - card shows this!)
+User: "Connections from the last 2 weeks"
+→ Use filterConnections with metWithinDays: 14
 
-REMEMBER: The UI cards are beautiful and show ALL the details. Your job is just to introduce them briefly.
+User: "Find Sarah"
+→ Use searchConnections with query: "Sarah"
+
+User: "People from NexHacks"
+→ Use filterConnections with eventName: "NexHacks"
+
+User: "Who works at Google?"
+→ Use searchConnections with query: "Google"
+
+User: "People I talked to this month"
+→ Use filterConnections with interactedWithinDays: 30
+
+User: "Connections I haven't talked to in 60 days"
+→ Use filterConnections with notInteractedInDays: 60
+
+User: "Tell me about Sarah"
+→ Use getPersonDetails with name: "Sarah"
+Tool returns: { summary: "Here's Sarah's profile." }
+You say: "Here's Sarah's profile."
+
+The UI automatically displays profile cards. Your job is to introduce them briefly.
 
 Be conversational, friendly, and proactive. Always use tools to query the database.`,
       tools: createTools(userId),
