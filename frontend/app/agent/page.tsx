@@ -4,14 +4,16 @@ import React from "react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { connections } from "@/lib/data"
+import { ConnectionProfileCard, type MongoDBConnection } from "@/components/connection-profile-card"
 
 type AgentState = "idle" | "listening" | "responding" | "done"
 
 interface Message {
   id: string
-  type: "user" | "agent" | "component"
+  type: "user" | "agent" | "component" | "profile"
   content: string
   componentTitle?: string
+  profileData?: MongoDBConnection
 }
 
 const promptChips = [
@@ -21,55 +23,82 @@ const promptChips = [
   "Find connections in AI/ML",
 ]
 
-const getAgentResponse = (prompt: string): { text: string; showComponent: boolean } => {
+// Helper function to convert frontend Connection to MongoDBConnection format
+const convertToMongoDBConnection = (conn: typeof connections[0]): MongoDBConnection => {
+  return {
+    _id: conn.id,
+    name: {
+      value: conn.name,
+    },
+    company: {
+      value: conn.industry, // Using industry as company for mock data
+    },
+    role: conn.tags[0] ? {
+      value: conn.tags[0], // Using first tag as role for mock data
+    } : undefined,
+    industry: conn.industry,
+    tags: conn.tags,
+    context: {
+      location: {
+        name: conn.location,
+        city: conn.location,
+      },
+      event: {
+        name: "Networking Event", // Default event name
+        type: "conference",
+      },
+      first_met: conn.metDate,
+    },
+    visual: {
+      headshot: {
+        url: conn.avatarUrl,
+      },
+    },
+    audio: {
+      personal_details: [
+        `Met at ${conn.summaryPlaceholder.toLowerCase()}`,
+        `Based in ${conn.location}`,
+        `Works in ${conn.industry}`,
+      ],
+    },
+    interaction_count: (conn.id.charCodeAt(0) % 5) + 1, // Deterministic based on connection ID
+    last_interaction: conn.metDate,
+  }
+}
+
+const getAgentResponse = (prompt: string): { text: string; profileDataArray?: MongoDBConnection[] } => {
   const lowerPrompt = prompt.toLowerCase()
   
+  // Get connections to display (default to first 4, or match based on prompt)
+  let selectedConnections: typeof connections = []
+  
   if (lowerPrompt.includes("recently") || lowerPrompt.includes("recent")) {
-    const recent = connections
+    selectedConnections = connections
       .sort((a, b) => new Date(b.metDate).getTime() - new Date(a.metDate).getTime())
-      .slice(0, 3)
-    return {
-      text: `You've met ${recent.length} people recently. The most recent are: ${recent.map(c => `${c.name} (${c.industry}, ${c.location})`).join(", ")}.`,
-      showComponent: true,
-    }
-  }
-  
-  if (lowerPrompt.includes("fintech")) {
+      .slice(0, 4)
+  } else if (lowerPrompt.includes("fintech")) {
     const fintech = connections.filter(c => c.industry.toLowerCase() === "fintech")
-    return {
-      text: fintech.length > 0
-        ? `I found ${fintech.length} connection${fintech.length > 1 ? "s" : ""} in fintech: ${fintech.map(c => c.name).join(" and ")}.`
-        : "I don't see any connections in fintech yet.",
-      showComponent: fintech.length > 0,
-    }
-  }
-  
-  if (lowerPrompt.includes("boston")) {
+    selectedConnections = fintech.slice(0, 4)
+    if (selectedConnections.length === 0) selectedConnections = connections.slice(0, 4)
+  } else if (lowerPrompt.includes("boston")) {
     const boston = connections.filter(c => c.location === "Boston")
-    return {
-      text: boston.length > 0
-        ? `You met ${boston.length} ${boston.length > 1 ? "people" : "person"} in Boston: ${boston.map(c => `${c.name} (${c.industry})`).join(" and ")}.`
-        : "I don't see any connections from Boston yet.",
-      showComponent: boston.length > 0,
-    }
-  }
-  
-  if (lowerPrompt.includes("ai") || lowerPrompt.includes("ml")) {
+    selectedConnections = boston.slice(0, 4)
+    if (selectedConnections.length === 0) selectedConnections = connections.slice(0, 4)
+  } else if (lowerPrompt.includes("ai") || lowerPrompt.includes("ml")) {
     const aiConnections = connections.filter(c => 
       c.industry.toLowerCase().includes("ai") || 
       c.tags.some(t => t.toLowerCase().includes("ai"))
     )
-    return {
-      text: aiConnections.length > 0
-        ? `I found ${aiConnections.length} connection${aiConnections.length > 1 ? "s" : ""} in AI/ML: ${aiConnections.map(c => c.name).join(" and ")}.`
-        : "I don't see any connections in AI/ML yet.",
-      showComponent: aiConnections.length > 0,
-    }
+    selectedConnections = aiConnections.slice(0, 4)
+    if (selectedConnections.length === 0) selectedConnections = connections.slice(0, 4)
+  } else {
+    // Default: show first 4 connections
+    selectedConnections = connections.slice(0, 4)
   }
   
   return {
-    text: `I understand you're asking about "${prompt}". Let me analyze your network... Based on your ${connections.length} connections, I can help you find relevant people and insights.`,
-    showComponent: false,
+    text: `Here are connections from your network:`,
+    profileDataArray: selectedConnections.map(conn => convertToMongoDBConnection(conn)),
   }
 }
 
@@ -95,21 +124,27 @@ export default function AgentPage() {
     
     const response = getAgentResponse(prompt)
     
-    const agentMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      type: "agent",
-      content: response.text,
-    }
-    setMessages(prev => [...prev, agentMessage])
-    
-    if (response.showComponent) {
-      const componentMessage: Message = {
-        id: (Date.now() + 2).toString(),
-        type: "component",
-        content: "Coming soon (custom React component)",
-        componentTitle: "Suggested Follow-up",
+    // Add agent text message if there's text
+    if (response.text) {
+      const agentMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: "agent",
+        content: response.text,
       }
-      setMessages(prev => [...prev, componentMessage])
+      setMessages(prev => [...prev, agentMessage])
+    }
+    
+    // Add profile cards if there's profile data array
+    if (response.profileDataArray && response.profileDataArray.length > 0) {
+      response.profileDataArray.forEach((profileData, index) => {
+        const profileMessage: Message = {
+          id: (Date.now() + 2 + index).toString(),
+          type: "profile",
+          content: "",
+          profileData: profileData,
+        }
+        setMessages(prev => [...prev, profileMessage])
+      })
     }
     
     setState("done")
@@ -126,7 +161,7 @@ export default function AgentPage() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header - Notion style */}
-      <header className="h-[45px] flex items-center justify-center border-b border-border px-4">
+      <header className="h-[45px] flex items-center justify-center border-b border-border px-4 pl-[52px] md:pl-4">
         <h1 className="text-sm font-medium">Network Agent</h1>
       </header>
 
@@ -210,34 +245,69 @@ export default function AgentPage() {
         {/* Transcript Area - Notion style */}
         {messages.length > 0 && (
           <div className="w-full max-w-xl flex-1 overflow-y-auto mb-4 space-y-3 px-2">
-            {messages.map(message => (
-              <div
-                key={message.id}
-                className={cn(
-                  "max-w-[85%]",
-                  message.type === "user" && "ml-auto",
-                  message.type !== "user" && "mr-auto"
-                )}
-              >
-                {message.type === "user" ? (
-                  <div className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground">
-                    {message.content}
-                  </div>
-                ) : message.type === "agent" ? (
-                  <div className="rounded bg-card border border-border px-3 py-2 text-sm">
-                    {message.content}
-                  </div>
-                ) : (
-                  <div className="rounded border border-dashed border-[var(--notion-blue)]/40 bg-[var(--notion-blue-bg)] p-3 mt-2">
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                      <span className="text-xs font-medium text-primary">{message.componentTitle}</span>
+            {messages.map((message, index) => {
+              // Check if this is a profile card and if there are consecutive profile cards
+              const isProfile = message.type === "profile"
+              const prevMessage = messages[index - 1]
+              const isProfileGroupStart = isProfile && prevMessage?.type !== "profile"
+              
+              // Collect consecutive profile cards if this is the start of a group
+              let profileGroup: typeof messages = []
+              if (isProfileGroupStart) {
+                profileGroup = [message]
+                let nextIdx = index + 1
+                while (nextIdx < messages.length && messages[nextIdx].type === "profile") {
+                  profileGroup.push(messages[nextIdx])
+                  nextIdx++
+                }
+              }
+              
+              // Skip rendering if this profile card is part of a group (not the first one)
+              if (isProfile && !isProfileGroupStart) {
+                return null
+              }
+              
+              return (
+                <div
+                  key={message.id}
+                  className={cn(
+                    message.type === "profile" ? "w-full" : "max-w-[85%]",
+                    message.type === "user" && "ml-auto",
+                    message.type !== "user" && "mr-auto"
+                  )}
+                >
+                  {message.type === "user" ? (
+                    <div className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground">
+                      {message.content}
                     </div>
-                    <p className="text-xs text-muted-foreground">{message.content}</p>
-                  </div>
-                )}
-              </div>
-            ))}
+                  ) : message.type === "agent" ? (
+                    <div className="rounded bg-card border border-border px-3 py-2 text-sm">
+                      {message.content}
+                    </div>
+                  ) : message.type === "profile" && message.profileData ? (
+                    // Profile cards container - can fit up to 4 side by side
+                    <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {profileGroup.map((profileMsg) => 
+                        profileMsg.type === "profile" && profileMsg.profileData ? (
+                          <ConnectionProfileCard 
+                            key={profileMsg.id} 
+                            connection={profileMsg.profileData} 
+                          />
+                        ) : null
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded border border-dashed border-[var(--notion-blue)]/40 bg-[var(--notion-blue-bg)] p-3 mt-2">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <div className="h-1.5 w-1.5 rounded-full bg-primary" />
+                        <span className="text-xs font-medium text-primary">{message.componentTitle}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{message.content}</p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 

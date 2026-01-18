@@ -42,7 +42,7 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header - Notion style */}
-      <header className="h-[45px] flex items-center justify-between border-b border-border px-4">
+      <header className="h-[45px] flex items-center justify-between border-b border-border px-4 pl-[52px] md:pl-4">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-medium">Your Network</h1>
           <span className="text-xs text-muted-foreground px-1.5 py-0.5 bg-muted rounded">
