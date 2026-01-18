@@ -6,6 +6,18 @@ import { createDraftConnection } from '../services/processingService.js';
 
 const SESSION_NAMESPACE = '/api/session';
 
+// Module-level map to track sessionId -> socket for cross-module communication
+const sessionSocketMap = new Map();
+
+/**
+ * Get the socket associated with a session ID
+ * @param {string} sessionId - Session identifier
+ * @returns {object|null} Socket.io socket or null if not found
+ */
+export const getSocketBySessionId = (sessionId) => {
+  return sessionSocketMap.get(sessionId) || null;
+};
+
 const toBuffer = (chunk) => {
   if (!chunk) return null;
   if (Buffer.isBuffer(chunk)) return chunk;
@@ -46,20 +58,26 @@ export const registerSessionSocket = (io) => {
     const startDeepgramConnection = (options = {}) => {
       if (deepgramConnection) return;
 
+      console.log(`[SessionSocket] Starting Deepgram connection for session ${currentSessionId}`);
+
       try {
         deepgramConnection = createLiveTranscriptionConnection({
           model: 'nova-3',
           language: 'en',
           diarize: true,
           smart_format: true,
+          interim_results: true,  // Get results while speaking, not just at end
+          // Let Deepgram auto-detect encoding from webm/opus container
           ...options
         });
       } catch (error) {
+        console.error(`[SessionSocket] Failed to create Deepgram connection:`, error);
         socket.emit('session:error', { message: `Deepgram error: ${error.message}` });
         return;
       }
 
       deepgramConnection.on(LiveTranscriptionEvents.Open, () => {
+        console.log(`[SessionSocket] Deepgram connection opened for session ${currentSessionId}`);
         socket.emit('session:audio_ready');
       });
 
@@ -73,6 +91,9 @@ export const registerSessionSocket = (io) => {
           words.map((word) => word.speaker).filter((speaker) => speaker !== undefined)
         );
         const speaker = speakers.size > 1 ? `${words[0]?.speaker}+` : words[0]?.speaker;
+
+        // Log all Deepgram responses (even empty ones) for debugging
+        console.log(`[SessionSocket] Deepgram response: is_final=${data.is_final}, transcript="${transcript.substring(0, 50)}${transcript.length > 50 ? '...' : ''}"`);
 
         if (!transcript) return;
 
@@ -101,6 +122,7 @@ export const registerSessionSocket = (io) => {
       });
 
       deepgramConnection.on(LiveTranscriptionEvents.Error, (error) => {
+        console.error(`[SessionSocket] Deepgram error:`, error);
         socket.emit('session:error', {
           message: `Deepgram error: ${error?.message || 'Unknown error'}`,
           details: error
@@ -108,6 +130,7 @@ export const registerSessionSocket = (io) => {
       });
 
       deepgramConnection.on(LiveTranscriptionEvents.Close, () => {
+        console.log(`[SessionSocket] Deepgram connection closed for session ${currentSessionId}`);
         closeDeepgramConnection();
       });
     };
@@ -125,6 +148,9 @@ export const registerSessionSocket = (io) => {
         // Create session in SessionManager
         SessionManager.createSession(sessionId, userId, context || {});
         currentSessionId = sessionId;
+
+        // Store socket reference for cross-module communication
+        sessionSocketMap.set(sessionId, socket);
 
         console.log(`[SessionSocket] Session started: ${sessionId} for user ${userId}`);
 
@@ -184,6 +210,7 @@ export const registerSessionSocket = (io) => {
     });
 
     // Event: session:audio - Handle audio chunks for transcription
+    let audioChunkCount = 0;
     socket.on('session:audio', (chunk) => {
       try {
         if (!currentSessionId) {
@@ -199,6 +226,11 @@ export const registerSessionSocket = (io) => {
         // Forward audio chunk to Deepgram
         const buffer = toBuffer(chunk);
         if (buffer && deepgramConnection) {
+          audioChunkCount++;
+          // Log first chunk and then every 20th chunk to avoid spam
+          if (audioChunkCount === 1 || audioChunkCount % 20 === 0) {
+            console.log(`[SessionSocket] 🎵 Audio chunk #${audioChunkCount} received (${buffer.length} bytes)`);
+          }
           deepgramConnection.send(buffer);
         }
       } catch (error) {
@@ -282,6 +314,8 @@ export const registerSessionSocket = (io) => {
           message: 'Session finalized and saved to database'
         });
 
+        // Clean up socket reference
+        sessionSocketMap.delete(currentSessionId);
         currentSessionId = null;
       } catch (error) {
         console.error('[SessionSocket] Error finalizing session:', error);
@@ -298,6 +332,9 @@ export const registerSessionSocket = (io) => {
 
       // If there's an active session, check if it should be auto-finalized
       if (currentSessionId) {
+        // Clean up socket reference
+        sessionSocketMap.delete(currentSessionId);
+        
         const staleIds = SessionManager.checkStaleSessions();
         if (staleIds.includes(currentSessionId)) {
           console.log(`[SessionSocket] Auto-finalizing stale session ${currentSessionId} on disconnect`);
@@ -361,6 +398,9 @@ export const registerSessionSocket = (io) => {
             sessionSnapshot.userId,
             false
           );
+
+          // Clean up socket reference for stale session
+          sessionSocketMap.delete(sessionId);
 
           console.log(`[SessionSocket] Auto-finalized stale session ${sessionId}`);
         } catch (error) {

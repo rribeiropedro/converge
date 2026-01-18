@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RealtimeVision } from '@overshoot/sdk';
 import { io } from 'socket.io-client';
-import { logoutFromAPI } from './authUtils';
+import { logoutFromAPI, getUser } from './authUtils';
 import './App.css';
 
 function App() {
@@ -20,14 +20,10 @@ function App() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const sessionSocketRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const audioProcessorRef = useRef(null);
-  const audioSourceRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const socketRef = useRef(null);
-  const audioStreamRef = useRef(null);
   const headshotRequestInFlightRef = useRef(false);
   const headshotGeneratedRef = useRef(false);
+  const currentSessionIdRef = useRef(null); // Keep track of current session ID for headshot generation
 
   const handleLogout = async () => {
     await logoutFromAPI();
@@ -90,72 +86,31 @@ function App() {
     }
   };
 
-  // Live audio transcription with WebSocket
-  const startAudioRecording = async () => {
+  // Start audio recording using session socket for transcription
+  const startAudioRecording = async (mediaStream) => {
     try {
-      console.log('🔌 Connecting to WebSocket at /api/transcribe/live');
+      console.log('🎤 Starting audio recording via session socket');
       
-      // Connect to WebSocket
-      const socket = io('/api/transcribe/live', {
-        transports: ['websocket', 'polling']
-      });
-      socketRef.current = socket;
-
-      // Connection event listeners
-      socket.on('connect', () => {
-        console.log('✅ WebSocket connected, ID:', socket.id);
-        setResults(prev => [...prev, {
-          text: '🔌 WebSocket connected',
-          timestamp: new Date().toLocaleTimeString(),
-          inferenceLatency: null,
-          totalLatency: null
-        }]);
-      });
-
-      socket.on('disconnect', (reason) => {
-        console.log('❌ WebSocket disconnected:', reason);
-        setResults(prev => [...prev, {
-          text: `🔌 WebSocket disconnected: ${reason}`,
-          timestamp: new Date().toLocaleTimeString(),
-          inferenceLatency: null,
-          totalLatency: null
-        }]);
-      });
-
-      socket.on('connect_error', (error) => {
-        console.error('❌ WebSocket connection error:', error);
-        setResults(prev => [...prev, {
-          text: `❌ Connection error: ${error.message}`,
-          timestamp: new Date().toLocaleTimeString(),
-          inferenceLatency: null,
-          totalLatency: null
-        }]);
-      });
-
-      // Start audio stream first
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      });
-      audioStreamRef.current = stream;
-
+      // Extract only audio tracks (MediaRecorder with audio mime type can't have video tracks)
+      const audioTracks = mediaStream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        console.error('No audio tracks found in stream');
+        return;
+      }
+      const audioOnlyStream = new MediaStream(audioTracks);
+      
       // Create MediaRecorder to capture audio chunks
-      const mediaRecorder = new MediaRecorder(stream, {
+      const mediaRecorder = new MediaRecorder(audioOnlyStream, {
         mimeType: 'audio/webm;codecs=opus',
         audioBitsPerSecond: 16000
       });
       
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && socketRef.current) {
-          // Convert blob to array buffer and send via socket
+        if (event.data.size > 0 && sessionSocketRef.current && sessionSocketRef.current.connected) {
+          // Convert blob to array buffer and send via session socket
           event.data.arrayBuffer().then(buffer => {
-            if (socketRef.current && socketRef.current.connected) {
-              console.log(`🎵 Sending audio chunk: ${buffer.byteLength} bytes`);
-              socketRef.current.emit('audio', buffer);
+            if (sessionSocketRef.current && sessionSocketRef.current.connected) {
+              sessionSocketRef.current.emit('session:audio', buffer);
             }
           });
         }
@@ -163,96 +118,27 @@ function App() {
       
       mediaRecorderRef.current = mediaRecorder;
 
-      // Set up socket event listeners
-      socket.on('ready', () => {
-        console.log('✅ WebSocket ready for audio streaming - Starting MediaRecorder');
-        setResults(prev => [...prev, {
-          text: '🎤 Live transcription ready - Recording started',
-          timestamp: new Date().toLocaleTimeString(),
-          inferenceLatency: null,
-          totalLatency: null
-        }]);
-
-        // Start recording only after WebSocket is ready (250ms chunks for live streaming)
-        if (mediaRecorderRef.current) {
-          mediaRecorderRef.current.start(250);
-          setIsRecording(true);
-        }
-      });
-
-      socket.on('transcript', (data) => {
-        console.log('📝 Transcript received:', data);
-        if (data.is_final) {
-          const speakerPrefix = data.speaker !== undefined ? `[Speaker ${data.speaker}] ` : '';
-          setAudioTranscript(prev => ({
-            text: (prev?.text || '') + ' ' + speakerPrefix + data.transcript,
-            timestamp: new Date().toLocaleTimeString()
-          }));
-          setResults(prev => [...prev, {
-            text: `💬 ${speakerPrefix}${data.transcript}`,
-            timestamp: new Date().toLocaleTimeString(),
-            inferenceLatency: null,
-            totalLatency: null
-          }]);
-        }
-      });
-
-      socket.on('error', (error) => {
-        console.error('WebSocket error:', error);
-        setResults(prev => [...prev, {
-          text: `❌ Transcription error: ${error.message}`,
-          timestamp: new Date().toLocaleTimeString(),
-          inferenceLatency: null,
-          totalLatency: null
-        }]);
-      });
-
-      socket.on('closed', () => {
-        console.log('WebSocket closed');
-      });
-
+      // Start recording immediately (250ms chunks for live streaming)
+      mediaRecorder.start(250);
+      setIsRecording(true);
+      
       setResults(prev => [...prev, {
-        text: '🎤 Initializing live transcription...',
+        text: '🎤 Live transcription started via session socket',
         timestamp: new Date().toLocaleTimeString(),
         inferenceLatency: null,
         totalLatency: null
       }]);
 
-      // Send start event to backend FIRST - recording will start when 'ready' event is received
-      console.log('📤 Sending start event to backend');
-      socket.emit('start', {
-        language: 'en',
-        model: 'nova-3',
-        smart_format: true,
-        diarize: true,
-        interim_results: true,
-        encoding: 'opus',
-        sample_rate: 16000
-      });
-
     } catch (error) {
       console.error('Error starting audio recording:', error);
-      alert('Failed to access microphone. Please check permissions.');
     }
   };
 
   const stopAudioRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
       setIsRecording(false);
-      
-      // Stop audio stream
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-        audioStreamRef.current = null;
-      }
-
-      // Close WebSocket connection
-      if (socketRef.current) {
-        socketRef.current.emit('stop');
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
       
       setResults(prev => [...prev, {
         text: '⏹️ Live transcription stopped',
@@ -288,7 +174,10 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ screenshots })
+        body: JSON.stringify({ 
+          screenshots,
+          sessionId: currentSessionIdRef.current 
+        })
       });
 
       if (!response.ok) {
@@ -341,46 +230,6 @@ function App() {
     return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
 
-  // Setup audio streaming for transcription
-  const setupAudioStream = (stream) => {
-    try {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-      processor.onaudioprocess = (event) => {
-        if (sessionSocketRef.current && sessionSocketRef.current.connected) {
-          const input = event.inputBuffer.getChannelData(0);
-          // Convert float32 to int16 PCM
-          const pcm16 = new Int16Array(input.length);
-          for (let i = 0; i < input.length; i++) {
-            const sample = Math.max(-1, Math.min(1, input[i]));
-            pcm16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-          }
-          sessionSocketRef.current.emit('session:audio', pcm16.buffer);
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-
-      audioContextRef.current = audioContext;
-      audioProcessorRef.current = processor;
-      audioSourceRef.current = source;
-    } catch (error) {
-      console.error('Error setting up audio stream:', error);
-    }
-  };
-
-  // Cleanup audio stream
-  const cleanupAudioStream = () => {
-    if (audioProcessorRef.current) audioProcessorRef.current.disconnect();
-    if (audioSourceRef.current) audioSourceRef.current.disconnect();
-    if (audioContextRef.current) audioContextRef.current.close();
-    audioProcessorRef.current = null;
-    audioSourceRef.current = null;
-    audioContextRef.current = null;
-  };
 
   const handleStart = async () => {
     try {
@@ -392,6 +241,7 @@ function App() {
       // Generate session ID
       const newSessionId = generateSessionId();
       setSessionId(newSessionId);
+      currentSessionIdRef.current = newSessionId; // Store in ref for headshot generation
       setSessionStatus('ready');
 
       // Connect to session WebSocket
@@ -422,13 +272,32 @@ function App() {
 
       sessionSocket.on('session:audio_update', (data) => {
         if (data.transcript_chunk) {
+          // Update accumulated transcript for display
+          const speakerPrefix = data.speaker !== undefined ? `[Speaker ${data.speaker}] ` : '';
+          if (data.is_final) {
+            setAudioTranscript(prev => ({
+              text: (prev?.text || '') + ' ' + speakerPrefix + data.transcript_chunk,
+              timestamp: new Date().toLocaleTimeString()
+            }));
+          }
           setResults(prev => [...prev, {
-            text: `💬 ${data.transcript_chunk}`,
+            text: `💬 ${speakerPrefix}${data.transcript_chunk}`,
             timestamp: new Date().toLocaleTimeString(),
             inferenceLatency: null,
             totalLatency: null
           }]);
         }
+      });
+
+      // Listen for face match results
+      sessionSocket.on('face_match_result', (data) => {
+        console.log('🎯 Face match result received:', data);
+        setResults(prev => [...prev, {
+          text: `🎯 Face match result: ${data}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
       });
 
       sessionSocket.on('session:finalized', (data) => {
@@ -451,9 +320,18 @@ function App() {
       });
 
       // Start session with context
+      // Get authenticated user
+      const user = getUser();
+      const userId = user?.id || user?._id;
+      if (!user || !userId) {
+        console.error('No authenticated user found');
+        navigate('/');
+        return;
+      }
+
       sessionSocket.emit('session:start', {
         sessionId: newSessionId,
-        userId: 'test-user-id', // TODO: Get from auth context
+        userId: userId, // Get from authenticated user
         context: {
           event: { name: 'NexHacks 2026', type: 'hackathon' },
           location: { name: 'Test Location', city: 'San Francisco' }
@@ -463,7 +341,12 @@ function App() {
       // Get camera and microphone stream
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
-        audio: true
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
       });
       
       // Show video preview
@@ -473,11 +356,8 @@ function App() {
       }
       streamRef.current = stream;
 
-      // Setup audio streaming for session-based transcription
-      setupAudioStream(stream);
-      
-      // Also start separate audio recording for live transcription
-      await startAudioRecording();
+      // Start audio recording via session socket (single socket for everything)
+      await startAudioRecording(stream);
 
       // Initialize Overshoot SDK
       const vision = new RealtimeVision({
@@ -605,9 +485,6 @@ function App() {
         visionRef.current = null;
       }
       
-      // Cleanup audio stream
-      cleanupAudioStream();
-      
       // Stop camera stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -624,6 +501,9 @@ function App() {
         sessionSocketRef.current.disconnect();
         sessionSocketRef.current = null;
       }
+      
+      // Clear session ID ref
+      currentSessionIdRef.current = null;
       
       setIsRunning(false);
       setSessionId(null);
@@ -646,23 +526,13 @@ function App() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
-      // Clean up session audio stream
-      cleanupAudioStream();
       // Clean up session socket
       if (sessionSocketRef.current) {
         sessionSocketRef.current.disconnect();
       }
       // Clean up audio recording
-      if (mediaRecorderRef.current && isRecording) {
+      if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
-      }
-      // Clean up audio stream
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      // Clean up WebSocket
-      if (socketRef.current) {
-        socketRef.current.disconnect();
       }
     };
   }, []);

@@ -2,6 +2,11 @@
  * Controller for Overshoot SDK related endpoints
  */
 
+import { generateFaceEmbedding } from '../services/faceEmbeddingService.js';
+import { findMatchingConnection } from '../services/faceMatching.js';
+import SessionManager from '../realtime/SessionManager.js';
+import { getSocketBySessionId } from '../realtime/sessionSocket.js';
+
 /**
  * Receive and log Overshoot SDK results
  * @route POST /api/overshoot-result
@@ -26,10 +31,14 @@ export const receiveOvershootResult = (req, res) => {
  */
 export const generateHeadshot = async (req, res) => {
   try {
-    const { screenshots } = req.body; // Array of base64-encoded images
+    const { screenshots, sessionId } = req.body; // Array of base64-encoded images + session ID
     
     if (!screenshots || !Array.isArray(screenshots) || screenshots.length !== 2) {
       return res.status(400).json({ error: 'Exactly 2 screenshots are required' });
+    }
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' });
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -192,84 +201,82 @@ export const generateHeadshot = async (req, res) => {
       });
     }
     
+    // Extract image URL from various response formats
+    let extractedImageUrl = null;
+    let textContent = '';
+    
     // Check if images array exists (OpenRouter format for image generation)
     if (Array.isArray(images) && images.length > 0) {
       const firstImage = images[0];
-      let imageUrl = null;
       
       // Handle OpenRouter's standard format: { type: "image_url", image_url: { url: "..." } }
       if (firstImage.type === 'image_url' && firstImage.image_url?.url) {
-        imageUrl = firstImage.image_url.url;
+        extractedImageUrl = firstImage.image_url.url;
       }
       // Fallback: handle if it's just { url: "..." }
       else if (firstImage.url) {
-        imageUrl = firstImage.url;
+        extractedImageUrl = firstImage.url;
       }
       // Fallback: handle if it's a string (base64)
       else if (typeof firstImage === 'string') {
-        imageUrl = firstImage.startsWith('data:') ? firstImage : `data:image/png;base64,${firstImage}`;
+        extractedImageUrl = firstImage.startsWith('data:') ? firstImage : `data:image/png;base64,${firstImage}`;
       }
       // Fallback: handle if it's { data: "base64..." }
       else if (firstImage.data) {
-        imageUrl = `data:image/png;base64,${firstImage.data}`;
+        extractedImageUrl = `data:image/png;base64,${firstImage.data}`;
       }
       
-      if (imageUrl) {
-        console.log('Successfully extracted image URL from OpenRouter response');
-        return res.json({ 
-          success: true, 
-          image: imageUrl,
-          text: typeof content === 'string' ? content : ''
-        });
-      } else {
+      textContent = typeof content === 'string' ? content : '';
+      
+      if (!extractedImageUrl) {
         console.error('Could not extract image URL from images array:', JSON.stringify(firstImage));
       }
     }
     
     // Check if content is an array (multimodal response)
-    if (Array.isArray(content)) {
+    if (!extractedImageUrl && Array.isArray(content)) {
       const imagePart = content.find(part => part.type === 'image_url' || part.type === 'image');
       const textPart = content.find(part => part.type === 'text');
       
       if (imagePart) {
-        const imageUrl = imagePart.image_url?.url || imagePart.url;
-        if (imageUrl) {
-          return res.json({ 
-            success: true, 
-            image: imageUrl,
-            text: textPart?.text || ''
-          });
-        }
+        extractedImageUrl = imagePart.image_url?.url || imagePart.url;
       }
-      
-      // If no image but has text
-      if (textPart) {
-        return res.json({ 
-          success: true, 
-          text: textPart.text,
-          note: 'Model returned text instead of image. Image generation may require a different model or the model may not support image output.'
-        });
-      }
+      textContent = textPart?.text || '';
     }
     
     // Check if content is a string (text-only response)
-    if (typeof content === 'string') {
+    if (!extractedImageUrl && typeof content === 'string') {
       // Check if string contains an image data URL
       if (content.includes('data:image')) {
         const imageMatch = content.match(/data:image\/[^;]+;base64,[^\s"']+/);
         if (imageMatch) {
-          return res.json({ 
-            success: true, 
-            image: imageMatch[0],
-            text: content
-          });
+          extractedImageUrl = imageMatch[0];
         }
       }
+      textContent = content;
+    }
+    
+    // If we have an image, perform face matching
+    if (extractedImageUrl) {
+      console.log('Successfully extracted image URL from OpenRouter response');
       
-      // Otherwise it's just text
+      // Perform face matching in the background (don't block the response)
+      performFaceMatching(extractedImageUrl, sessionId).catch(err => {
+        console.error('Face matching error:', err);
+      });
+      
       return res.json({ 
         success: true, 
-        text: content,
+        image: extractedImageUrl,
+        text: textContent
+      });
+    }
+    
+    // No image found - return text-only response
+    if (textContent) {
+      return res.json({ 
+        success: true, 
+        text: textContent,
         note: 'Model returned text instead of image. Image generation may require a different model or the model may not support image output.'
       });
     }
@@ -293,4 +300,92 @@ export const generateHeadshot = async (req, res) => {
     });
   }
 };
+
+/**
+ * Perform face matching using the generated headshot
+ * @param {string} imageUrl - Base64 data URL of the generated headshot
+ * @param {string} sessionId - Session ID to update with match results
+ */
+async function performFaceMatching(imageUrl, sessionId) {
+  try {
+    // Get session to retrieve userId
+    let session;
+    try {
+      session = SessionManager.getSession(sessionId);
+    } catch (err) {
+      console.error(`[FaceMatching] Session ${sessionId} not found:`, err.message);
+      return;
+    }
+    
+    const userId = session.userId;
+    console.log(`[FaceMatching] Starting face matching for session ${sessionId}, user ${userId}`);
+    
+    // Generate face embedding from the generated headshot
+    let faceEmbedding;
+    try {
+      faceEmbedding = await generateFaceEmbedding(imageUrl);
+      console.log(`[FaceMatching] Generated face embedding with ${faceEmbedding.length} dimensions`);
+    } catch (err) {
+      console.error(`[FaceMatching] Failed to generate face embedding:`, err.message);
+      // Update session with no match (couldn't generate embedding)
+      SessionManager.updateFaceMatch(sessionId, {
+        matched: false,
+        connectionId: null,
+        name: null,
+        connectionData: null
+      });
+      
+      // Emit update to client
+      const socket = getSocketBySessionId(sessionId);
+      if (socket) {
+        socket.emit('face_match_result', 'TEST UI UPDATE');
+      }
+      return;
+    }
+    
+    // Find matching connection in MongoDB
+    const matches = await findMatchingConnection(userId, faceEmbedding);
+    console.log(`[FaceMatching] Found ${matches.length} potential matches`);
+    
+    if (matches.length > 0) {
+      // Best match found
+      const bestMatch = matches[0];
+      console.log(`[FaceMatching] Best match: ${bestMatch.connection.name} (score: ${bestMatch.score})`);
+      
+      // Update session with match results
+      SessionManager.updateFaceMatch(sessionId, {
+        matched: true,
+        connectionId: bestMatch.connection._id.toString(),
+        name: bestMatch.connection.name,
+        connectionData: {
+          company: bestMatch.connection.company,
+          visual: bestMatch.connection.visual,
+          score: bestMatch.score
+        }
+      });
+    } else {
+      // No match found - new person
+      console.log(`[FaceMatching] No match found - this is a new person`);
+      
+      SessionManager.updateFaceMatch(sessionId, {
+        matched: false,
+        connectionId: null,
+        name: null,
+        connectionData: null
+      });
+    }
+    
+    // Emit update to client via WebSocket
+    const socket = getSocketBySessionId(sessionId);
+    if (socket) {
+      console.log(`[FaceMatching] Emitting face_match_result to client`);
+      socket.emit('face_match_result', 'TEST UI UPDATE');
+    } else {
+      console.warn(`[FaceMatching] No socket found for session ${sessionId}`);
+    }
+    
+  } catch (error) {
+    console.error('[FaceMatching] Error in face matching:', error);
+  }
+}
 

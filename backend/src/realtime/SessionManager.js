@@ -47,6 +47,12 @@ class SessionManager {
         headshot: {
           url: null,
           base64: null
+        },
+        faceMatch: {
+          matched: false,
+          connectionId: null,
+          name: null,
+          connectionData: null
         }
       },
       audio: {
@@ -120,6 +126,35 @@ class SessionManager {
   }
 
   /**
+   * Update face match results from face recognition
+   * @param {string} sessionId - Session identifier
+   * @param {object} matchData - Face match result data
+   * @param {boolean} matchData.matched - Whether a match was found
+   * @param {string|null} matchData.connectionId - MongoDB connection ID if matched
+   * @param {string|null} matchData.name - Name of the matched person
+   * @param {object|null} matchData.connectionData - Full connection data if matched
+   */
+  updateFaceMatch(sessionId, matchData) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    session.visual.faceMatch = {
+      matched: matchData.matched || false,
+      connectionId: matchData.connectionId || null,
+      name: matchData.name || null,
+      connectionData: matchData.connectionData || null
+    };
+
+    // Update last activity timestamp
+    session.lastActivity = new Date();
+    
+    console.log(`[SessionManager] Updated face match for session ${sessionId}: matched=${matchData.matched}`);
+    return session;
+  }
+
+  /**
    * Update audio data from LiveKit/Deepgram channel
    * @param {string} sessionId - Session identifier
    * @param {object} audioData - Audio data payload (transcript chunk or parsed profile)
@@ -132,6 +167,10 @@ class SessionManager {
 
     // If it's a transcript chunk, accumulate it
     if (audioData.transcript) {
+      const speakerLabel = audioData.speaker !== undefined ? `[Speaker ${audioData.speaker}]` : '';
+      const finalLabel = audioData.is_final ? '(final)' : '(interim)';
+      console.log(`[SessionManager] 📝 Transcript ${finalLabel} ${speakerLabel}: "${audioData.transcript}"`);
+      
       session.audio.transcript_chunks.push({
         transcript: audioData.transcript,
         timestamp: new Date(),
