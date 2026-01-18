@@ -48,13 +48,13 @@ export async function processNewInteraction(audioInput, visualInput, context, us
   return { type: 'new', draft };
 }
 
-export async function createDraftConnection(audioData, visualData, context, userId) {
+export async function createDraftConnection(audioData, visualData, context, userId, isTemporary = false, extraFields = {}) {
   const needsReview = calculateNeedsReview(audioData);
   const fieldsNeedingReview = getFieldsNeedingReview(audioData);
 
   const connectionData = {
     user_id: userId,
-    status: 'draft',
+    status: isTemporary ? 'temporary_draft' : 'draft',
     name: {
       value: audioData.profile.name?.value || 'Unknown',
       confidence: audioData.profile.name?.confidence || 'low',
@@ -70,6 +70,17 @@ export async function createDraftConnection(audioData, visualData, context, user
       confidence: audioData.profile.role?.confidence || 'low',
       source: 'livekit',
     },
+    // Education fields from LiveInsightEngine
+    institution: extraFields.institution ? {
+      value: extraFields.institution.value,
+      confidence: extraFields.institution.confidence || 'medium',
+      source: 'livekit',
+    } : undefined,
+    major: extraFields.major ? {
+      value: extraFields.major.value,
+      confidence: extraFields.major.confidence || 'medium',
+      source: 'livekit',
+    } : undefined,
     visual: {
       face_embedding: visualData.face_embedding || [],
       face_embedding_history: visualData.face_embedding?.length === 128 
@@ -83,7 +94,7 @@ export async function createDraftConnection(audioData, visualData, context, user
       topics_discussed: audioData.topics_discussed || [],
       their_challenges: audioData.their_challenges || [],
       follow_up_hooks: (audioData.follow_up_hooks || []).map(hook => ({
-        type: hook.type,
+        type: hook.type || 'other',
         detail: hook.detail,
         completed: false,
         completed_at: null,
@@ -107,6 +118,10 @@ export async function createDraftConnection(audioData, visualData, context, user
     interaction_count: 0,
     last_interaction: null,
   };
+
+  // Remove undefined fields
+  if (!connectionData.institution) delete connectionData.institution;
+  if (!connectionData.major) delete connectionData.major;
 
   const connection = new Connection(connectionData);
   await connection.save();

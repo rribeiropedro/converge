@@ -23,6 +23,8 @@ export const AudioDataSchema = z.object({
     name: ProfileFieldSchema,
     company: ProfileFieldSchema,
     role: ProfileFieldSchema,
+    institution: ProfileFieldSchema, // Education: school/university
+    major: ProfileFieldSchema,       // Education: field of study
   }).optional(),
   topics_discussed: z.array(z.string()).optional().default([]),
   their_challenges: z.array(z.string()).optional().default([]),
@@ -30,6 +32,19 @@ export const AudioDataSchema = z.object({
   personal_details: z.array(z.string()).optional().default([]),
   transcript_summary: z.string().optional().default(''),
 }).passthrough(); // Allow extra fields but validate known ones
+
+// Live insight extraction schema (from liveInsightEngine)
+export const LiveInsightSchema = z.object({
+  name: z.string().optional(),
+  company: z.string().optional(),
+  role: z.string().optional(),
+  institution: z.string().optional(),
+  major: z.string().optional(),
+  topics: z.array(z.string()).optional().default([]),
+  challenges: z.array(z.string()).optional().default([]),
+  hooks: z.array(z.string()).optional().default([]),
+  personal: z.array(z.string()).optional().default([]),
+}).passthrough();
 
 // Visual appearance schema
 const AppearanceSchema = z.object({

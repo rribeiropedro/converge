@@ -3,6 +3,7 @@ import { createLiveTranscriptionConnection, LiveTranscriptionEvents } from '../c
 import { parseVisualData } from '../services/visualParser.js';
 import { parseTranscript } from '../services/transcriptParser.js';
 import { createDraftConnection } from '../services/processingService.js';
+import LiveInsightEngine from '../services/liveInsightEngine.js';
 
 const SESSION_NAMESPACE = '/api/session';
 
@@ -41,6 +42,7 @@ export const registerSessionSocket = (io) => {
     let currentSessionId = null;
     let deepgramReady = false;
     let audioQueue = []; // Queue chunks until connection is ready
+    let insightEngine = null; // Real-time LLM insight extraction
 
     const closeDeepgramConnection = () => {
       if (!deepgramConnection) return;
@@ -71,9 +73,10 @@ export const registerSessionSocket = (io) => {
           diarize: true,
           smart_format: true,
           interim_results: true,  // Get results while speaking, not just at end
-          encoding: 'opus',  // Required for WebM/Opus streams - Deepgram can't auto-detect in live mode
+          encoding: 'opus',       // Required for WebM/Opus streams - Deepgram can't auto-detect in live mode
           ...options
         });
+        console.log(`[SessionSocket] Deepgram connection created for session ${currentSessionId}`);
       } catch (error) {
         console.error(`[SessionSocket] Failed to create Deepgram connection:`, error);
         socket.emit('session:error', { message: `Deepgram error: ${error.message}` });
@@ -110,6 +113,11 @@ export const registerSessionSocket = (io) => {
 
         if (!transcript) return;
 
+        // Feed transcript to LiveInsightEngine for real-time LLM extraction
+        if (insightEngine) {
+          insightEngine.addTranscript(transcript, data.is_final);
+        }
+
         // Update session with transcript chunk
         try {
           SessionManager.updateAudio(currentSessionId, {
@@ -135,16 +143,30 @@ export const registerSessionSocket = (io) => {
       });
 
       deepgramConnection.on(LiveTranscriptionEvents.Error, (error) => {
-        console.error(`[SessionSocket] Deepgram error:`, error);
+        console.error(`[SessionSocket] ❌ Deepgram error:`, error);
         socket.emit('session:error', {
           message: `Deepgram error: ${error?.message || 'Unknown error'}`,
           details: error
         });
       });
 
-      deepgramConnection.on(LiveTranscriptionEvents.Close, () => {
-        console.log(`[SessionSocket] Deepgram connection closed for session ${currentSessionId}`);
+      deepgramConnection.on(LiveTranscriptionEvents.Close, (code, reason) => {
+        console.log(`[SessionSocket] Deepgram connection closed for session ${currentSessionId}, code=${code}, reason=${reason || 'none'}`);
         closeDeepgramConnection();
+      });
+      
+      // Add metadata/warning events for debugging
+      deepgramConnection.on(LiveTranscriptionEvents.Metadata, (data) => {
+        console.log(`[SessionSocket] Deepgram metadata:`, JSON.stringify(data));
+      });
+      
+      deepgramConnection.on(LiveTranscriptionEvents.Warning, (warning) => {
+        console.warn(`[SessionSocket] ⚠️ Deepgram warning:`, warning);
+      });
+      
+      // Unhandled events for debugging
+      deepgramConnection.on(LiveTranscriptionEvents.Unhandled, (data) => {
+        console.log(`[SessionSocket] Deepgram unhandled event:`, JSON.stringify(data));
       });
     };
 
@@ -164,6 +186,9 @@ export const registerSessionSocket = (io) => {
 
         // Store socket reference for cross-module communication
         sessionSocketMap.set(sessionId, socket);
+
+        // Create LiveInsightEngine for real-time transcript extraction
+        insightEngine = new LiveInsightEngine(sessionId, socket);
 
         console.log(`[SessionSocket] Session started: ${sessionId} for user ${userId}`);
 
@@ -269,35 +294,61 @@ export const registerSessionSocket = (io) => {
         // Close Deepgram connection
         closeDeepgramConnection();
 
+        // Get LiveInsightEngine's extracted data (real-time LLM extractions)
+        const insightState = insightEngine ? insightEngine.getFinalState() : null;
+        
+        // Clean up insight engine
+        if (insightEngine) {
+          insightEngine.cleanup();
+          insightEngine = null;
+        }
+
         // Get session snapshot
         const sessionSnapshot = SessionManager.finalizeSession(currentSessionId);
 
-        // Parse final transcript if we have chunks
+        // Start with insight engine data (already has profile fields extracted)
         let audioData = {
           profile: sessionSnapshot.audio.profile,
-          topics_discussed: sessionSnapshot.audio.topics_discussed,
-          their_challenges: sessionSnapshot.audio.their_challenges,
-          follow_up_hooks: sessionSnapshot.audio.follow_up_hooks,
-          personal_details: sessionSnapshot.audio.personal_details,
+          topics_discussed: insightState?.audio?.topics_discussed || sessionSnapshot.audio.topics_discussed,
+          their_challenges: insightState?.audio?.their_challenges || sessionSnapshot.audio.their_challenges,
+          follow_up_hooks: insightState?.audio?.follow_up_hooks || sessionSnapshot.audio.follow_up_hooks,
+          personal_details: insightState?.audio?.personal_details || sessionSnapshot.audio.personal_details,
           transcript_summary: sessionSnapshot.audio.transcript_summary
         };
 
-        // If we have transcript chunks but no summary, parse the full transcript
+        // Merge insight engine profile fields with existing (prefer insight engine if it has data)
+        const profileFromInsight = {};
+        if (insightState?.name) profileFromInsight.name = insightState.name;
+        if (insightState?.company) profileFromInsight.company = insightState.company;
+        if (insightState?.role) profileFromInsight.role = insightState.role;
+        
+        audioData.profile = {
+          name: profileFromInsight.name || audioData.profile.name,
+          company: profileFromInsight.company || audioData.profile.company,
+          role: profileFromInsight.role || audioData.profile.role,
+        };
+
+        // If we have transcript chunks but no summary, parse the full transcript for a comprehensive summary
         if (sessionSnapshot.audio.transcript_chunks.length > 0 && !audioData.transcript_summary) {
-          const fullTranscript = sessionSnapshot.audio.transcript_chunks
+          const fullTranscript = insightState?.fullTranscript || sessionSnapshot.audio.transcript_chunks
             .map(chunk => chunk.transcript)
             .join(' ')
             .trim();
 
           if (fullTranscript) {
             try {
-              // Parse transcript to extract profile data
+              // Parse transcript to extract profile data (comprehensive final pass)
               const parsed = await parseTranscript(fullTranscript);
               
               // Merge parsed data with existing audio data
+              // Only override if parsed has higher confidence
               audioData = {
-                ...parsed,
-                // Keep existing profile if parsed has lower confidence
+                ...audioData,
+                topics_discussed: [...new Set([...audioData.topics_discussed, ...parsed.topics_discussed])],
+                their_challenges: [...new Set([...audioData.their_challenges, ...parsed.their_challenges])],
+                personal_details: [...new Set([...audioData.personal_details, ...parsed.personal_details])],
+                transcript_summary: parsed.transcript_summary || audioData.transcript_summary,
+                // Keep existing profile unless parsed has high confidence
                 profile: {
                   name: parsed.profile.name?.confidence === 'high' ? parsed.profile.name : audioData.profile.name,
                   company: parsed.profile.company?.confidence === 'high' ? parsed.profile.company : audioData.profile.company,
@@ -311,13 +362,23 @@ export const registerSessionSocket = (io) => {
           }
         }
 
+        // Prepare visual data with institution/major from insight engine
+        const visualData = {
+          ...sessionSnapshot.visual,
+        };
+
         // Create draft connection in MongoDB
         const draftConnection = await createDraftConnection(
           audioData,
-          sessionSnapshot.visual,
+          visualData,
           sessionSnapshot.context,
           sessionSnapshot.userId,
-          false // Not temporary
+          false, // Not temporary
+          {
+            // Pass additional profile fields from insight engine
+            institution: insightState?.institution || null,
+            major: insightState?.major || null,
+          }
         );
 
         console.log(`[SessionSocket] Session ${currentSessionId} finalized, Connection ID: ${draftConnection._id}`);
@@ -348,6 +409,12 @@ export const registerSessionSocket = (io) => {
       
       // Close Deepgram connection
       closeDeepgramConnection();
+
+      // Clean up insight engine
+      if (insightEngine) {
+        insightEngine.cleanup();
+        insightEngine = null;
+      }
 
       // If there's an active session, check if it should be auto-finalized
       if (currentSessionId) {
