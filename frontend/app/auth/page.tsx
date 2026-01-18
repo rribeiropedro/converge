@@ -8,8 +8,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import { setAuthData } from "@/lib/auth"
 
 type AuthMode = "login" | "signup"
+
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
 
 export default function AuthPage() {
   const router = useRouter()
@@ -17,7 +21,7 @@ export default function AuthPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
+  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({})
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {}
@@ -44,9 +48,42 @@ export default function AuthPage() {
     if (!validateForm()) return
     
     setIsLoading(true)
-    await new Promise(resolve => setTimeout(resolve, 800))
-    setIsLoading(false)
-    router.push("/dashboard")
+    setErrors({}) // Clear any previous errors
+    
+    try {
+      // Determine the endpoint based on mode
+      const endpoint = mode === "login" 
+        ? `${API_URL}/api/users/login`
+        : `${API_URL}/api/users`
+      
+      const response = await fetch(endpoint, {
+        method: "POST",
+        credentials: "include", // Include cookies for httpOnly
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      })
+      
+      const data = await response.json()
+      
+      if (!response.ok) {
+        // Handle API errors
+        setErrors({ general: data.error || "Authentication failed" })
+        setIsLoading(false)
+        return
+      }
+      
+      // Store the token and user data
+      setAuthData(data.token, data.user)
+      
+      // Redirect to dashboard
+      router.push("/dashboard")
+    } catch (error) {
+      console.error("Auth error:", error)
+      setErrors({ general: "Network error. Please check your connection." })
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -69,7 +106,10 @@ export default function AuthPage() {
             <div className="flex rounded bg-muted p-0.5 mb-6">
               <button
                 type="button"
-                onClick={() => setMode("login")}
+                onClick={() => {
+                  setMode("login")
+                  setErrors({})
+                }}
                 className={cn(
                   "flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors",
                   mode === "login"
@@ -81,7 +121,10 @@ export default function AuthPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setMode("signup")}
+                onClick={() => {
+                  setMode("signup")
+                  setErrors({})
+                }}
                 className={cn(
                   "flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors",
                   mode === "signup"
@@ -116,7 +159,9 @@ export default function AuthPage() {
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value)
-                    if (errors.email) setErrors(prev => ({ ...prev, email: undefined }))
+                    if (errors.email || errors.general) {
+                      setErrors(prev => ({ ...prev, email: undefined, general: undefined }))
+                    }
                   }}
                   className={cn(
                     "h-9 bg-input border-border focus:border-primary focus:ring-1 focus:ring-primary",
@@ -137,7 +182,9 @@ export default function AuthPage() {
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value)
-                    if (errors.password) setErrors(prev => ({ ...prev, password: undefined }))
+                    if (errors.password || errors.general) {
+                      setErrors(prev => ({ ...prev, password: undefined, general: undefined }))
+                    }
                   }}
                   className={cn(
                     "h-9 bg-input border-border focus:border-primary focus:ring-1 focus:ring-primary",
@@ -161,6 +208,12 @@ export default function AuthPage() {
                 </div>
               )}
 
+              {errors.general && (
+                <div className="rounded bg-[var(--notion-red)]/10 border border-[var(--notion-red)]/20 p-3">
+                  <p className="text-xs text-[var(--notion-red)]">{errors.general}</p>
+                </div>
+              )}
+
               <Button
                 type="submit"
                 className="w-full h-9"
@@ -181,7 +234,10 @@ export default function AuthPage() {
                   {"Don't have an account? "}
                   <button
                     type="button"
-                    onClick={() => setMode("signup")}
+                    onClick={() => {
+                      setMode("signup")
+                      setErrors({})
+                    }}
                     className="text-primary hover:underline"
                   >
                     Sign up
@@ -192,7 +248,10 @@ export default function AuthPage() {
                   Already have an account?{" "}
                   <button
                     type="button"
-                    onClick={() => setMode("login")}
+                    onClick={() => {
+                      setMode("login")
+                      setErrors({})
+                    }}
                     className="text-primary hover:underline"
                   >
                     Log in

@@ -1,9 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, Mic, Settings, ChevronRight } from "lucide-react"
+import { LayoutDashboard, Mic, Settings, ChevronRight, LogOut } from "lucide-react"
+import { logoutFromAPI, getUser } from "@/lib/auth"
+import { useState } from "react"
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
 
 const navItems = [
   {
@@ -26,6 +30,15 @@ const navItems = [
 
 export function SidebarNav() {
   const pathname = usePathname()
+  const router = useRouter()
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const user = getUser()
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true)
+    await logoutFromAPI(API_URL)
+    router.push('/auth')
+  }
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col bg-sidebar border-r border-sidebar-border">
@@ -70,12 +83,30 @@ export function SidebarNav() {
       </nav>
       
       {/* Footer */}
-      <div className="p-3 border-t border-sidebar-border">
-        <div className="rounded bg-sidebar-accent px-3 py-2">
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Your network memory, powered by AI
-          </p>
-        </div>
+      <div className="p-3 border-t border-sidebar-border space-y-2">
+        {/* User info */}
+        {user && (
+          <div className="rounded bg-sidebar-accent px-3 py-2">
+            <p className="text-[11px] font-medium text-foreground truncate">{user.email}</p>
+            <p className="text-[10px] text-muted-foreground">
+              Member since {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+            </p>
+          </div>
+        )}
+        
+        {/* Logout button */}
+        <button
+          onClick={handleLogout}
+          disabled={isLoggingOut}
+          className={cn(
+            "flex items-center gap-2 w-full rounded px-2 py-1.5 text-sm transition-colors",
+            "text-muted-foreground hover:bg-[#3F4448] hover:text-sidebar-foreground",
+            isLoggingOut && "opacity-50 cursor-not-allowed"
+          )}
+        >
+          <LogOut className="h-4 w-4 flex-shrink-0" />
+          <span className="truncate">{isLoggingOut ? "Logging out..." : "Log out"}</span>
+        </button>
       </div>
     </aside>
   )
