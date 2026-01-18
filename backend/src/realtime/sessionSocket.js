@@ -207,24 +207,28 @@ export const registerSessionSocket = (io) => {
 
     // Event: session:visual - Handle Overshoot visual data
     socket.on('session:visual', async (data) => {
+      // CRITICAL: Capture sessionId at the START of this handler
+      // This prevents race conditions where currentSessionId changes during async operations
+      const capturedSessionId = currentSessionId;
+
       try {
-        if (!currentSessionId) {
+        if (!capturedSessionId) {
           socket.emit('session:error', { message: 'No active session. Call session:start first.' });
           return;
         }
 
         // Log raw visual data received
-        console.log(`\n📥 Raw visual data received for session ${currentSessionId}`);
+        console.log(`\n📥 Raw visual data received for session ${capturedSessionId}`);
         console.log(`  Data keys: ${Object.keys(data).join(', ')}`);
-        
+
         // Check if this is an Overshoot result and parse it
         if (data.result) {
           let parsedResult = null;
           try {
-            parsedResult = typeof data.result === 'string' 
-              ? JSON.parse(data.result) 
+            parsedResult = typeof data.result === 'string'
+              ? JSON.parse(data.result)
               : data.result;
-            
+
             console.log(`  📋 Parsed Overshoot Result:`);
             console.log(`    face_detected: ${parsedResult.face_detected}`);
             console.log(`    appearance_profile: ${parsedResult.appearance_profile ? 'Present' : 'Missing'}`);
@@ -233,17 +237,17 @@ export const registerSessionSocket = (io) => {
             console.log(`  ⚠️ Could not parse result as JSON`);
           }
         }
-        
+
         if (data.headshot) {
           console.log(`  Headshot: ${data.headshot.url ? 'URL present' : ''} ${data.headshot.base64 ? 'Base64 present' : ''}`);
         }
-        if (data.face_embedding) {
-          console.log(`  Face embedding: ${data.face_embedding.length} dimensions`);
+        if (data.appearance_embedding) {
+          console.log(`  Appearance embedding: ${data.appearance_embedding.length} dimensions`);
         }
 
         // Parse visual data (may need processing via visualParser)
         let visualData = data;
-        
+
         // If it's raw Overshoot payload, parse it
         if (data.result && typeof data.result === 'string') {
           try {
@@ -256,25 +260,42 @@ export const registerSessionSocket = (io) => {
         // Process visual data (face embedding, appearance, etc.)
         const parsedVisual = await parseVisualData(visualData);
 
+        // Check if session still exists before updating (it may have been finalized during async processing)
+        if (!SessionManager.getActiveSessionIds().includes(capturedSessionId)) {
+          console.log(`[SessionSocket] Session ${capturedSessionId} already finalized, skipping visual update`);
+          return;
+        }
+
         // Update session
-        SessionManager.updateVisual(currentSessionId, parsedVisual);
+        SessionManager.updateVisual(capturedSessionId, parsedVisual);
 
         // Get updated session state
-        const session = SessionManager.getSession(currentSessionId);
+        const session = SessionManager.getSession(capturedSessionId);
 
-        // Perform face matching immediately if we have a face embedding
-        if (parsedVisual.face_embedding && parsedVisual.face_embedding.length === 128) {
+        // Perform appearance matching if we have appearance data
+        const appearanceDescription = parsedVisual.appearance?.description || '';
+        const hasAppearanceData = appearanceDescription || (parsedVisual.appearance_embedding && parsedVisual.appearance_embedding.length === 1536);
+
+        if (hasAppearanceData) {
           logger.logFaceMatchingStarted(
-            currentSessionId, 
-            true, 
-            parsedVisual.face_embedding.length
+            capturedSessionId,
+            true,
+            parsedVisual.appearance_embedding?.length || 0
           );
           try {
             const userId = session.userId;
-            const matches = await findMatchingConnection(userId, parsedVisual.face_embedding);
-            
+            // Get name from session audio data if available
+            const nameFromAudio = session.audio?.profile?.name?.value || '';
+            const matches = await findMatchingConnection(userId, nameFromAudio, appearanceDescription);
+
+            // Check if session still exists after async face matching
+            if (!SessionManager.getActiveSessionIds().includes(capturedSessionId)) {
+              console.log(`[SessionSocket] Session ${capturedSessionId} finalized during face matching, skipping update`);
+              return;
+            }
+
             logger.logFaceMatchResult(
-              currentSessionId,
+              capturedSessionId,
               matches.length > 0 && matches[0].score >= 0.80,
               matches.length > 0 ? {
                 name: matches[0].connection.name?.value || matches[0].connection.name || 'Unknown',
@@ -283,11 +304,11 @@ export const registerSessionSocket = (io) => {
               } : null,
               matches
             );
-            
+
             if (matches.length > 0 && matches[0].score >= 0.80) {
               // Match found - update session with match results
               const bestMatch = matches[0];
-              SessionManager.updateFaceMatch(currentSessionId, {
+              SessionManager.updateFaceMatch(capturedSessionId, {
                 matched: true,
                 connectionId: bestMatch.connection._id.toString(),
                 name: bestMatch.connection.name?.value || 'Unknown',
@@ -313,7 +334,7 @@ export const registerSessionSocket = (io) => {
               });
             } else {
               // No match found - new person (already logged above)
-              SessionManager.updateFaceMatch(currentSessionId, {
+              SessionManager.updateFaceMatch(capturedSessionId, {
                 matched: false,
                 connectionId: null,
                 name: null,
@@ -335,24 +356,27 @@ export const registerSessionSocket = (io) => {
               });
             }
           } catch (error) {
-            logger.logError(currentSessionId, 'Face matching', error);
+            logger.logError(capturedSessionId, 'Face matching', error);
             // Don't fail the whole visual update if face matching fails
-            SessionManager.updateFaceMatch(currentSessionId, {
-              matched: false,
-              connectionId: null,
-              name: null,
-              connectionData: null
-            });
+            // But only update if session still exists
+            if (SessionManager.getActiveSessionIds().includes(capturedSessionId)) {
+              SessionManager.updateFaceMatch(capturedSessionId, {
+                matched: false,
+                connectionId: null,
+                name: null,
+                connectionData: null
+              });
+            }
           }
         } else {
           // No face embedding available
-          logger.logFaceMatchingStarted(currentSessionId, false, 0);
+          logger.logFaceMatchingStarted(capturedSessionId, false, 0);
         }
 
         // Emit visual update to client
         socket.emit('session:visual_update', {
           visual: {
-            face_embedding: session.visual.face_embedding.length > 0,
+            appearance_embedding: session.visual.appearance_embedding?.length > 0,
             appearance: session.visual.appearance.description,
             environment: session.visual.environment.description
           },
@@ -423,7 +447,18 @@ export const registerSessionSocket = (io) => {
           insightEngine = null;
         }
 
-        // Get session snapshot
+        // Wait for pending headshot if one is being generated (max 60 seconds)
+        if (SessionManager.hasHeadshotPending(currentSessionId)) {
+          console.log(`[SessionSocket] ⏳ Waiting for headshot to complete before finalizing...`);
+          const headshotCompleted = await SessionManager.waitForHeadshot(currentSessionId, 60000);
+          if (headshotCompleted) {
+            console.log(`[SessionSocket] ✅ Headshot completed, proceeding with finalization`);
+          } else {
+            console.log(`[SessionSocket] ⚠️ Headshot timed out, proceeding without it`);
+          }
+        }
+
+        // Get session snapshot (now includes headshot if it completed)
         const sessionSnapshot = SessionManager.finalizeSession(currentSessionId);
         console.log(`[SessionSocket] 📸 Session snapshot: userId=${sessionSnapshot.userId}, chunks=${sessionSnapshot.audio.transcript_chunks.length}`);
 

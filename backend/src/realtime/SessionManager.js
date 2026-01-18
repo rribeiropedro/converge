@@ -11,14 +11,81 @@ class SessionManager {
   constructor() {
     // In-memory Map: sessionId -> session state
     this.sessions = new Map();
-    
+
+    // Track pending headshot requests: sessionId -> { pending: boolean, resolve: function }
+    this.pendingHeadshots = new Map();
+
     // Stale session cleanup interval (runs every 60 seconds)
     this.cleanupInterval = null;
     this.STALE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
     this.CLEANUP_INTERVAL_MS = 60 * 1000; // 1 minute
-    
+
     // Start cleanup interval
     this.startCleanupInterval();
+  }
+
+  /**
+   * Mark that a headshot request is pending for this session
+   * @param {string} sessionId - Session identifier
+   */
+  markHeadshotPending(sessionId) {
+    this.pendingHeadshots.set(sessionId, { pending: true, resolve: null });
+    console.log(`[SessionManager] Headshot marked pending for session ${sessionId}`);
+  }
+
+  /**
+   * Mark that headshot is complete for this session
+   * @param {string} sessionId - Session identifier
+   */
+  markHeadshotComplete(sessionId) {
+    const pending = this.pendingHeadshots.get(sessionId);
+    if (pending) {
+      console.log(`[SessionManager] Headshot complete for session ${sessionId}`);
+      if (pending.resolve) {
+        pending.resolve(); // Resolve the waiting promise
+      }
+      this.pendingHeadshots.delete(sessionId);
+    }
+  }
+
+  /**
+   * Check if session has a pending headshot
+   * @param {string} sessionId - Session identifier
+   * @returns {boolean}
+   */
+  hasHeadshotPending(sessionId) {
+    return this.pendingHeadshots.has(sessionId) && this.pendingHeadshots.get(sessionId).pending;
+  }
+
+  /**
+   * Wait for headshot to complete (with timeout)
+   * @param {string} sessionId - Session identifier
+   * @param {number} timeoutMs - Maximum wait time in milliseconds
+   * @returns {Promise<boolean>} - true if headshot completed, false if timed out
+   */
+  async waitForHeadshot(sessionId, timeoutMs = 60000) {
+    if (!this.hasHeadshotPending(sessionId)) {
+      return true; // No pending headshot, proceed immediately
+    }
+
+    console.log(`[SessionManager] Waiting for headshot to complete for session ${sessionId} (timeout: ${timeoutMs}ms)`);
+
+    return new Promise((resolve) => {
+      const pending = this.pendingHeadshots.get(sessionId);
+
+      // Set up timeout
+      const timeout = setTimeout(() => {
+        console.log(`[SessionManager] Headshot wait timed out for session ${sessionId}`);
+        this.pendingHeadshots.delete(sessionId);
+        resolve(false);
+      }, timeoutMs);
+
+      // Store resolve function so markHeadshotComplete can call it
+      pending.resolve = () => {
+        clearTimeout(timeout);
+        resolve(true);
+      };
+    });
   }
 
   /**
@@ -37,7 +104,8 @@ class SessionManager {
     const session = {
       userId,
       visual: {
-        face_embedding: [],
+        face_embedding: [],  // Legacy: 128-dim face vectors (kept for compatibility)
+        appearance_embedding: [],  // New: 1536-dim text embeddings from appearance description
         appearance: {
           description: '',
           distinctive_features: []
@@ -95,6 +163,11 @@ class SessionManager {
     }
 
     // Merge visual data (Overshoot payload may have different structure)
+    if (visualData.appearance_embedding) {
+      session.visual.appearance_embedding = visualData.appearance_embedding;
+    }
+
+    // Legacy: still support face_embedding for backwards compatibility
     if (visualData.face_embedding) {
       session.visual.face_embedding = visualData.face_embedding;
     }
