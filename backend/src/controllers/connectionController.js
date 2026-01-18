@@ -7,6 +7,9 @@ import {
   addInteractionToExistingConnection,
 } from '../services/processingService.js';
 import Connection from '../models/Connection.js';
+import { generateFaceEmbedding } from '../services/faceEmbeddingService.js';
+import { findMatchingConnection, determineMatchAction } from '../services/faceMatching.js';
+import User from '../models/User.js';
 
 export async function process(req, res) {
   try {
@@ -181,5 +184,78 @@ export async function remove(req, res) {
     }
     console.error('Delete connection error:', error);
     res.status(500).json({ error: error.message });
+  }
+}
+
+export async function testFaceRecognition(req, res) {
+  try {
+    const { imageData, userId } = req.body;
+
+    if (!imageData) {
+      return res.status(400).json({ 
+        error: 'imageData is required (base64 data URI or URL)',
+        example: 'data:image/jpeg;base64,/9j/4AAQ...'
+      });
+    }
+
+    // Get or create test user if userId not provided
+    let testUser;
+    if (userId) {
+      testUser = await User.findById(userId);
+      if (!testUser) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+    } else {
+      // Create or get test user
+      testUser = await User.findOne({ email: 'test-face@nexhacks.com' });
+      if (!testUser) {
+        testUser = await User.create({
+          name: 'Face Test User',
+          email: 'test-face@nexhacks.com'
+        });
+      }
+    }
+
+    // Generate embedding
+    console.log('Generating face embedding...');
+    const embedding = await generateFaceEmbedding(imageData);
+    
+    if (!embedding || embedding.length !== 128) {
+      return res.status(500).json({ 
+        error: 'Invalid embedding generated',
+        embedding_length: embedding?.length 
+      });
+    }
+
+    // Find matches
+    console.log('Finding matching connections...');
+    const matches = await findMatchingConnection(testUser._id, embedding);
+
+    // Determine action
+    const action = determineMatchAction(matches, {
+      name: { value: 'Test Person', confidence: 'high', source: 'manual' }
+    });
+
+    res.json({
+      success: true,
+      embedding_length: embedding.length,
+      embedding_preview: embedding.slice(0, 5),
+      matches: matches.map(m => ({
+        connection_id: m.connection._id,
+        name: m.connection.name.value,
+        company: m.connection.company?.value,
+        score: m.score,
+        confidence: m.score >= 0.85 ? 'high' : m.score >= 0.70 ? 'medium' : 'low'
+      })),
+      match_action: action.action,
+      match_score: action.match_score,
+      message: `Found ${matches.length} potential match${matches.length !== 1 ? 'es' : ''}`
+    });
+  } catch (error) {
+    console.error('Face recognition test error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }
