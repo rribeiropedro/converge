@@ -254,6 +254,9 @@ function CameraRecorder() {
   };
 
   const handleStart = async () => {
+    // Immediately hide the placeholder when user clicks start
+    setIsRunning(true);
+    
     try {
       // Reset per-session headshot state
       headshotGeneratedRef.current = false;
@@ -478,9 +481,9 @@ function CameraRecorder() {
 
       visionRef.current = vision;
       await vision.start();
-      setIsRunning(true);
     } catch (error) {
       console.error('Error starting vision:', error);
+      setIsRunning(false); // Reset on error
       alert('Failed to start camera. Please check your API key and permissions.');
     }
   };
