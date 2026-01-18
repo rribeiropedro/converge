@@ -1,5 +1,5 @@
 import express from 'express';
-import { AccessToken } from 'livekit-server-sdk';
+let AccessToken;
 import auth from '../middleware/auth.js';
 
 const router = express.Router();
@@ -11,6 +11,18 @@ const router = express.Router();
  */
 router.post('/token', auth, async (req, res) => {
   try {
+    if (!AccessToken) {
+      try {
+        const livekitModule = await import('livekit-server-sdk');
+        AccessToken = livekitModule.AccessToken;
+      } catch (importError) {
+        return res.status(500).json({
+          error: 'LiveKit server SDK not installed. Run npm install livekit-server-sdk in backend.',
+          message: importError.message
+        });
+      }
+    }
+
     const { roomName, participantName } = req.body;
     const userId = req.user._id.toString(); // Get from authenticated user
 

@@ -181,9 +181,15 @@ export const registerSessionSocket = (io) => {
           return;
         }
 
+        if (insightEngine) {
+          insightEngine.cleanup();
+          insightEngine = null;
+        }
+
         // Create session in SessionManager
         SessionManager.createSession(sessionId, userId, context || {});
         currentSessionId = sessionId;
+        insightEngine = new LiveInsightEngine(sessionId, socket);
 
         // Store socket reference for cross-module communication
         sessionSocketMap.set(sessionId, socket);
