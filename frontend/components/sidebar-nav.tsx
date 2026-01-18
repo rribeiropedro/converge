@@ -100,7 +100,7 @@ export function SidebarNav() {
         <div className="flex h-5 w-5 items-center justify-center rounded bg-primary">
           <span className="text-[10px] font-semibold text-primary-foreground">N</span>
         </div>
-        <span className="text-sm font-medium">NexHacks</span>
+        <span className="text-sm font-medium">Converge</span>
         <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto" />
       </div>
       

@@ -11,7 +11,7 @@ export default function LandingPage() {
           <div className="flex h-6 w-6 items-center justify-center rounded bg-primary">
             <span className="text-xs font-semibold text-primary-foreground">N</span>
           </div>
-          <span className="text-sm font-medium">NexHacks</span>
+          <span className="text-sm font-medium">Converge</span>
         </div>
         <nav className="flex items-center gap-2">
           <Link href="/auth">
@@ -39,7 +39,7 @@ export default function LandingPage() {
           </h1>
           
           <p className="mt-4 text-base text-muted-foreground leading-relaxed max-w-xl text-pretty">
-            NexHacks captures your conversations and builds a personal knowledge graph 
+            Converge captures your conversations and builds a personal knowledge graph 
             of your network. Never forget a name, a connection, or a follow-up again.
           </p>
           
@@ -86,7 +86,7 @@ export default function LandingPage() {
                 <div className="text-[11px] font-medium text-[var(--notion-orange)] uppercase tracking-wide mb-1">Step 2</div>
                 <h3 className="text-sm font-medium mb-1">Capture</h3>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Our AI extracts key details—names, interests, and action items—automatically.
+                  Our AI extracts key details automatically: names, interests, environment, and more.
                 </p>
               </div>
 
@@ -162,10 +162,10 @@ export default function LandingPage() {
             <div className="flex h-5 w-5 items-center justify-center rounded bg-primary">
               <span className="text-[10px] font-semibold text-primary-foreground">N</span>
             </div>
-            <span className="text-xs font-medium">NexHacks</span>
+            <span className="text-xs font-medium">Converge</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Built for the hackathon
+            Built at NexHacks 2026
           </p>
         </div>
       </footer>
