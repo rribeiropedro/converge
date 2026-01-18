@@ -16,6 +16,7 @@ interface Message {
   componentTitle?: string
   profileData?: MongoDBConnection
   isInterim?: boolean // For live transcription
+  segmentId?: string // For tracking transcription segments
 }
 
 const promptChips = [
@@ -181,45 +182,78 @@ export default function AgentPage() {
           }
         })
 
-        // Listen for data messages (transcriptions, text responses)
+        // Register text stream handler for transcriptions (agent speech and user speech)
+        room.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+          try {
+            const message = await reader.readAll()
+            const attributes = reader.info?.attributes || {}
+            const isFinal = attributes['lk.transcription_final'] === 'true'
+            const transcribedTrackId = attributes['lk.transcribed_track_id']
+            const segmentId = attributes['lk.segment_id']
+            
+            // Determine if this is from the agent or user
+            const isAgent = participantInfo.identity.includes('agent')
+            
+            if (isAgent) {
+              // Agent transcription (what the agent is saying)
+              setMessages(prev => {
+                // Remove any interim agent messages with the same segment ID
+                const filtered = prev.filter(m => 
+                  !(m.type === 'agent' && m.segmentId === segmentId && m.isInterim)
+                )
+                
+                return [...filtered, {
+                  id: segmentId || Date.now().toString(),
+                  type: "agent",
+                  content: message,
+                  isInterim: !isFinal,
+                  segmentId,
+                }]
+              })
+            } else {
+              // User transcription (what the user said)
+              setMessages(prev => {
+                const lastMsg = prev[prev.length - 1]
+                if (lastMsg?.isInterim && lastMsg.type === 'user' && lastMsg.segmentId === segmentId) {
+                  // Update interim transcription
+                  return [...prev.slice(0, -1), { 
+                    ...lastMsg, 
+                    content: message, 
+                    isInterim: !isFinal 
+                  }]
+                } else if (!isFinal) {
+                  // New interim transcription
+                  return [...prev, {
+                    id: segmentId || Date.now().toString(),
+                    type: "user",
+                    content: message,
+                    isInterim: true,
+                    segmentId,
+                  }]
+                } else {
+                  // Final transcription - remove interim and add final
+                  return [...prev.filter(m => !(m.isInterim && m.segmentId === segmentId)), {
+                    id: segmentId || Date.now().toString(),
+                    type: "user",
+                    content: message,
+                    isInterim: false,
+                    segmentId,
+                  }]
+                }
+              })
+            }
+          } catch (error) {
+            console.error('Error reading text stream:', error)
+          }
+        })
+        
+        // Also listen for data messages (for any custom data if needed)
         room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
           try {
             const decoder = new TextDecoder()
             const data = JSON.parse(decoder.decode(payload))
-            
-            if (data.type === 'transcription') {
-              // User transcription
-              setMessages(prev => {
-                const lastMsg = prev[prev.length - 1]
-                if (lastMsg?.isInterim && lastMsg.type === 'user') {
-                  // Update interim transcription
-                  return [...prev.slice(0, -1), { ...lastMsg, content: data.text, isInterim: !data.isFinal }]
-                } else if (!data.isFinal) {
-                  // New interim transcription
-                  return [...prev, {
-                    id: Date.now().toString(),
-                    type: "user",
-                    content: data.text,
-                    isInterim: true,
-                  }]
-                } else {
-                  // Final transcription
-                  return [...prev.filter(m => !m.isInterim), {
-                    id: Date.now().toString(),
-                    type: "user",
-                    content: data.text,
-                    isInterim: false,
-                  }]
-                }
-              })
-            } else if (data.type === 'agent_response') {
-              // Agent text response
-              setMessages(prev => [...prev, {
-                id: Date.now().toString(),
-                type: "agent",
-                content: data.text,
-              }])
-            }
+            console.log('Data message received:', data)
+            // Handle any custom data messages if needed
           } catch (error) {
             console.error('Error parsing data message:', error)
           }
