@@ -16,7 +16,30 @@ function CameraRecorder() {
   const [sessionStatus, setSessionStatus] = useState('idle'); // idle, ready, recording, finalized
   const [isRecording, setIsRecording] = useState(false);
   const [audioTranscript, setAudioTranscript] = useState(null);
+  const [showInsightsOverlay, setShowInsightsOverlay] = useState(true);
+  const [profileImage, setProfileImage] = useState('https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop'); // Static test profile image
+  
+  // Insights overlay data - supports bullet points
+  // Can be updated dynamically via updateInsights() from socket events or API calls
+  const [insightsData, setInsightsData] = useState({
+    items: [
+      { type: 'bullet', text: 'Professional networking event detected' },
+      { type: 'bullet', text: 'Topic: AI & Machine Learning' },
+      { type: 'bullet', text: 'Sentiment: Positive and engaging' },
+      { type: 'bullet', text: '3 key talking points identified' },
+      { type: 'bullet', text: 'Strong rapport building observed' }
+    ]
+  });
   const visionRef = useRef(null);
+
+  // Helper function to update insights data dynamically
+  // Example: updateInsights({ items: [...] })
+  const updateInsights = (newData) => {
+    setInsightsData(prev => ({
+      ...prev,
+      ...newData
+    }));
+  };
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const sessionSocketRef = useRef(null);
@@ -184,12 +207,15 @@ function CameraRecorder() {
         console.log('📝 Transcript received:', data);
         if (data.is_final) {
           const speakerPrefix = data.speaker !== undefined ? `[Speaker ${data.speaker}] ` : '';
+          const transcriptText = data.transcript;
+          
           setAudioTranscript(prev => ({
-            text: (prev?.text || '') + ' ' + speakerPrefix + data.transcript,
+            text: (prev?.text || '') + ' ' + speakerPrefix + transcriptText,
             timestamp: new Date().toLocaleTimeString()
           }));
+          
           setResults(prev => [...prev, {
-            text: `💬 ${speakerPrefix}${data.transcript}`,
+            text: `💬 ${speakerPrefix}${transcriptText}`,
             timestamp: new Date().toLocaleTimeString(),
             inferenceLatency: null,
             totalLatency: null
@@ -206,6 +232,21 @@ function CameraRecorder() {
           totalLatency: null
         }]);
       });
+
+      // Example: Listen for insights data from backend (optional)
+      // socket.on('insights', (data) => {
+      //   console.log('📊 Insights received:', data);
+      //   updateInsights({
+      //     items: data.items.map(item => ({
+      //       type: 'bullet',
+      //       text: item.text || item
+      //     }))
+      //   });
+      //   // If profile image is included (e.g., base64 or URL)
+      //   if (data.profileImage) {
+      //     setProfileImage(data.profileImage);
+      //   }
+      // });
 
       socket.on('closed', () => {
         console.log('WebSocket closed');
@@ -703,6 +744,47 @@ function CameraRecorder() {
                 <div className="placeholder-icon">📸</div>
                 <p>Camera preview will appear here</p>
               </div>
+            )}
+
+            {/* Mobile Insights Overlay - Top-aligned, scrollable */}
+            {isRunning && showInsightsOverlay && insightsData.items.length > 0 && (
+              <div className="insights-overlay">
+                <div className="insights-overlay-content">
+                  <h3 className="insights-header">Converge</h3>
+                  <div className="insights-body">
+                    <ul className="insights-list">
+                      {insightsData.items.map((item, index) => (
+                        <li key={index} className="insight-item">
+                          {item.type === 'bullet' && <span className="bullet-dot">•</span>}
+                          <span className="insight-text">{item.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {profileImage && (
+                      <div className="profile-image-container">
+                        <img 
+                          src={profileImage} 
+                          alt="Profile" 
+                          className="profile-image"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Show insights button when hidden */}
+            {isRunning && !showInsightsOverlay && (
+              <button 
+                className="insights-show-btn"
+                onClick={() => setShowInsightsOverlay(true)}
+                aria-label="Show insights"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+                </svg>
+              </button>
             )}
           </div>
         </div>
