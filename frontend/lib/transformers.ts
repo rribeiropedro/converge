@@ -12,10 +12,15 @@ export function transformConnection(backend: BackendConnection): FrontendConnect
     id: backend._id,
     name: backend.name.value,
     nameConfidence: backend.name.confidence,
-    company: backend.company.value,
-    companyConfidence: backend.company.confidence,
+    isStudent: backend.is_student ?? false,
+    company: backend.company?.value,
+    companyConfidence: backend.company?.confidence,
     role: backend.role?.value,
     roleConfidence: backend.role?.confidence,
+    institution: backend.institution?.value,
+    institutionConfidence: backend.institution?.confidence,
+    major: backend.major?.value,
+    majorConfidence: backend.major?.confidence,
 
     // Visual/avatar
     avatarUrl: backend.visual?.headshot?.url || backend.visual?.headshot?.base64,

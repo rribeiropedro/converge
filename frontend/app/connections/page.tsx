@@ -296,13 +296,23 @@ function ConnectionCard({
             )}
           </div>
 
-          {(connection.company || connection.role) && (
-            <p className="text-xs text-muted-foreground truncate mt-0.5">
-              {connection.role && connection.company
-                ? `${connection.role} at ${connection.company}`
-                : connection.company || connection.role
-              }
-            </p>
+          {/* Show professional info or education info based on isStudent */}
+          {connection.isStudent ? (
+            (connection.major || connection.institution) && (
+              <p className="text-xs text-muted-foreground truncate mt-0.5">
+                {connection.major && connection.institution
+                  ? `${connection.major} at ${connection.institution}`
+                  : connection.major || connection.institution}
+              </p>
+            )
+          ) : (
+            (connection.company || connection.role) && (
+              <p className="text-xs text-muted-foreground truncate mt-0.5">
+                {connection.role && connection.company
+                  ? `${connection.role} at ${connection.company}`
+                  : connection.company || connection.role}
+              </p>
+            )
           )}
         </div>
       </div>
@@ -378,7 +388,11 @@ function ConnectionListItem({
 
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-[150px]">
           <Building2 className="h-3 w-3" />
-          <span className="truncate">{connection.company || "—"}</span>
+          <span className="truncate">
+            {connection.isStudent
+              ? connection.institution || "—"
+              : connection.company || "—"}
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-[120px]">

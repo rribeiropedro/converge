@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NexHacks is an AI-powered personal CRM that captures conversations at networking events and builds a queryable knowledge graph of professional connections. It uses audio transcription (Deepgram) and video analysis (Overshoot) to extract structured profiles from real conversations.
+Converge is an AI-powered personal CRM that captures conversations at networking events and builds a queryable knowledge graph of professional connections. It uses audio transcription (Deepgram) and video analysis (Overshoot) to extract structured profiles from real conversations.
 
 ## Tech Stack
 

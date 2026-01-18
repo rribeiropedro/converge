@@ -210,7 +210,12 @@ async function fetchRandomUsers(count) {
 async function seedConnections() {
   console.log('🌱 Seeding database with realistic LLM-style data...\n');
 
-  const mongoUri = process.env.MONGODB_URI || 'mongodb+srv://nexhacks_admin:nexhacks123@converge.mza4dws.mongodb.net/converge?appName=converge';
+  const mongoUri = process.env.MONGODB_URI;
+  if (!mongoUri) {
+    console.error('❌ Error: MONGODB_URI environment variable is required');
+    console.error('   Please set MONGODB_URI in your .env file');
+    process.exit(1);
+  }
   await mongoose.connect(mongoUri);
   console.log('✅ Connected to MongoDB');
 

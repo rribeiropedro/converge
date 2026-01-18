@@ -103,9 +103,12 @@ export interface BackendConnection {
   _id: string
   user_id: string
   status: ConnectionStatus
+  is_student?: boolean // true if connection is a student, false if professional
   name: ConfidenceField<string>
-  company: ConfidenceField<string>
+  company?: ConfidenceField<string> // Now optional (was required)
   role?: ConfidenceField<string>
+  institution?: ConfidenceField<string> // Education field for students
+  major?: ConfidenceField<string> // Education field for students
   visual: VisualData
   audio: AudioData
   context: ContextData
@@ -127,10 +130,15 @@ export interface FrontendConnection {
   id: string
   name: string
   nameConfidence: ConfidenceLevel
-  company: string
-  companyConfidence: ConfidenceLevel
+  isStudent?: boolean // true if connection is a student
+  company?: string // Now optional
+  companyConfidence?: ConfidenceLevel
   role?: string
   roleConfidence?: ConfidenceLevel
+  institution?: string // Education field for students
+  institutionConfidence?: ConfidenceLevel
+  major?: string // Education field for students
+  majorConfidence?: ConfidenceLevel
   avatarUrl?: string
   location: string
   city: string
@@ -195,7 +203,76 @@ export interface ApproveConnectionRequest {
     name: string
     company: string
     role: string
+    institution: string
+    major: string
     tags: string[]
     industry: string
+    is_student: boolean
   }>
+}
+
+export interface NetworkAnalyticsMetrics {
+  totalConnections: number
+  newConnectionsThisMonth: number
+  followUpCompletionRate: number
+  needsReviewCount: number
+  averageInteractions: number
+  activeConnectionsCount: number
+}
+
+export interface GrowthDataPoint {
+  date: string
+  count: number
+  cumulative: number
+}
+
+export interface CategoryCount {
+  name: string
+  value: number
+}
+
+export interface LocationCount {
+  city: string
+  count: number
+}
+
+export interface CompanyCount {
+  company: string
+  count: number
+}
+
+export interface EventTypeCount {
+  type: string
+  count: number
+}
+
+export interface FollowUpStatusData {
+  type: string
+  completed: number
+  pending: number
+}
+
+export interface TopicCount {
+  topic: string
+  count: number
+}
+
+export interface NetworkAnalyticsData {
+  metrics: NetworkAnalyticsMetrics
+  growthData: GrowthDataPoint[]
+  industryData: CategoryCount[]
+  locationData: LocationCount[]
+  companyData: CompanyCount[]
+  eventTypeData: EventTypeCount[]
+  followUpData: FollowUpStatusData[]
+  topicsData: TopicCount[]
+}
+
+export interface NetworkRecommendation {
+  type: 'action' | 'insight' | 'warning' | 'opportunity'
+  title: string
+  description: string
+  priority: 'high' | 'medium' | 'low'
+  actionableStep?: string
+  relatedConnection?: string
 }

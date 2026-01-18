@@ -7,6 +7,8 @@ import type {
   ConnectionResponse,
   ConnectionsQueryParams,
   ApproveConnectionRequest,
+  NetworkAnalyticsData,
+  NetworkRecommendation,
 } from './types'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
@@ -151,7 +153,6 @@ export async function getConnectionCounts(): Promise<{
   archived: number
   total: number
 }> {
-  // Fetch counts for each status in parallel
   const [draftRes, approvedRes, archivedRes] = await Promise.all([
     getConnections({ status: 'draft', limit: 1 }),
     getConnections({ status: 'approved', limit: 1 }),
@@ -164,4 +165,16 @@ export async function getConnectionCounts(): Promise<{
     archived: archivedRes.total,
     total: draftRes.total + approvedRes.total + archivedRes.total,
   }
+}
+
+export async function getNetworkAnalytics(): Promise<NetworkAnalyticsData> {
+  const response = await fetchWithAuth(`${API_URL}/api/analytics/network`)
+  return handleResponse<NetworkAnalyticsData>(response)
+}
+
+export async function getNetworkRecommendations(): Promise<NetworkRecommendation[]> {
+  const response = await fetchWithAuth(`${API_URL}/api/analytics/recommendations`, {
+    method: 'POST',
+  })
+  return handleResponse<NetworkRecommendation[]>(response)
 }

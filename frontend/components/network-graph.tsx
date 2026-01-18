@@ -463,8 +463,12 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode, grou
                   {tooltip.connection.name}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {tooltip.connection.role || tooltip.connection.industry}
-                  {tooltip.connection.company && ` @ ${tooltip.connection.company}`}
+                  {tooltip.connection.isStudent
+                    ? tooltip.connection.major || tooltip.connection.institution || 'Student'
+                    : tooltip.connection.role || tooltip.connection.industry}
+                  {tooltip.connection.isStudent
+                    ? tooltip.connection.institution && ` @ ${tooltip.connection.institution}`
+                    : tooltip.connection.company && ` @ ${tooltip.connection.company}`}
                 </p>
               </div>
             </div>

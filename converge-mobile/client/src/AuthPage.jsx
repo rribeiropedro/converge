@@ -60,7 +60,7 @@ function AuthPage({ onAuthSuccess }) {
       <header className="auth-header-top">
         <div className="auth-header-logo">
           <div className="logo-icon">N</div>
-          <span className="auth-header-title">NexHacks</span>
+          <span className="auth-header-title">Converge</span>
         </div>
       </header>
 
