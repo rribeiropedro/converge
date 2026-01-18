@@ -106,6 +106,7 @@ class SessionManager {
       visual: {
         face_embedding: [],  // Legacy: 128-dim face vectors (kept for compatibility)
         appearance_embedding: [],  // New: 1536-dim text embeddings from appearance description
+        is_speaking: false,
         appearance: {
           description: '',
           distinctive_features: []
