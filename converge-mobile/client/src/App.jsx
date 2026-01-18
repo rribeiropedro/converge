@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RealtimeVision } from '@overshoot/sdk';
 import { io } from 'socket.io-client';
+import { logoutFromAPI } from './authUtils';
 import './App.css';
 
 function App() {
+  const navigate = useNavigate();
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState([]);
   const [screenshotBuffer, setScreenshotBuffer] = useState([]);
@@ -25,6 +28,11 @@ function App() {
   const audioStreamRef = useRef(null);
   const headshotRequestInFlightRef = useRef(false);
   const headshotGeneratedRef = useRef(false);
+
+  const handleLogout = async () => {
+    await logoutFromAPI();
+    navigate('/');
+  };
 
   // Capture current frame from video element
   const captureVideoFrame = (videoElement) => {
@@ -661,6 +669,38 @@ function App() {
 
   return (
     <div className="App">
+      {/* Logout button overlay */}
+      <button
+        onClick={handleLogout}
+        style={{
+          position: 'fixed',
+          top: '10px',
+          right: '10px',
+          zIndex: 9999,
+          padding: '0.5rem 1rem',
+          background: 'rgba(220, 38, 38, 0.9)',
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontSize: '0.875rem',
+          fontWeight: '500',
+          backdropFilter: 'blur(10px)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+          transition: 'all 0.2s',
+        }}
+        onMouseEnter={(e) => {
+          e.target.style.background = 'rgba(220, 38, 38, 1)';
+          e.target.style.transform = 'translateY(-1px)';
+        }}
+        onMouseLeave={(e) => {
+          e.target.style.background = 'rgba(220, 38, 38, 0.9)';
+          e.target.style.transform = 'translateY(0)';
+        }}
+      >
+        Log out
+      </button>
+
       <header className="App-header">
         {/* Header - Notion style */}
         <h1>
