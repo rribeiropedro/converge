@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { RealtimeVision } from '@overshoot/sdk';
+import { io } from 'socket.io-client';
 import './App.css';
 
 function App() {
@@ -8,9 +9,14 @@ function App() {
   const [screenshotBuffer, setScreenshotBuffer] = useState([]);
   const [generatedImage, setGeneratedImage] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioTranscript, setAudioTranscript] = useState(null);
   const visionRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const socketRef = useRef(null);
+  const audioStreamRef = useRef(null);
 
   // Capture current frame from video element
   const captureVideoFrame = (videoElement) => {
@@ -41,6 +47,9 @@ function App() {
   // Helper function to stop camera and vision SDK
   const stopCamera = async () => {
     try {
+      // Stop audio recording
+      stopAudioRecording();
+      
       // Stop Overshoot SDK
       if (visionRef.current) {
         await visionRef.current.stop();
@@ -62,6 +71,179 @@ function App() {
       setScreenshotBuffer([]); // Clear buffer
     } catch (error) {
       console.error('Error stopping camera:', error);
+    }
+  };
+
+  // Live audio transcription with WebSocket
+  const startAudioRecording = async () => {
+    try {
+      console.log('🔌 Connecting to WebSocket at /api/transcribe/live');
+      
+      // Connect to WebSocket
+      const socket = io('/api/transcribe/live', {
+        transports: ['websocket', 'polling']
+      });
+      socketRef.current = socket;
+
+      // Connection event listeners
+      socket.on('connect', () => {
+        console.log('✅ WebSocket connected, ID:', socket.id);
+        setResults(prev => [...prev, {
+          text: '🔌 WebSocket connected',
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      socket.on('disconnect', (reason) => {
+        console.log('❌ WebSocket disconnected:', reason);
+        setResults(prev => [...prev, {
+          text: `🔌 WebSocket disconnected: ${reason}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('❌ WebSocket connection error:', error);
+        setResults(prev => [...prev, {
+          text: `❌ Connection error: ${error.message}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      // Start audio stream first
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      audioStreamRef.current = stream;
+
+      // Create MediaRecorder to capture audio chunks
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 16000
+      });
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && socketRef.current) {
+          // Convert blob to array buffer and send via socket
+          event.data.arrayBuffer().then(buffer => {
+            if (socketRef.current && socketRef.current.connected) {
+              console.log(`🎵 Sending audio chunk: ${buffer.byteLength} bytes`);
+              socketRef.current.emit('audio', buffer);
+            }
+          });
+        }
+      };
+      
+      mediaRecorderRef.current = mediaRecorder;
+
+      // Set up socket event listeners
+      socket.on('ready', () => {
+        console.log('✅ WebSocket ready for audio streaming - Starting MediaRecorder');
+        setResults(prev => [...prev, {
+          text: '🎤 Live transcription ready - Recording started',
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+
+        // Start recording only after WebSocket is ready (250ms chunks for live streaming)
+        if (mediaRecorderRef.current) {
+          mediaRecorderRef.current.start(250);
+          setIsRecording(true);
+        }
+      });
+
+      socket.on('transcript', (data) => {
+        console.log('📝 Transcript received:', data);
+        if (data.is_final) {
+          const speakerPrefix = data.speaker !== undefined ? `[Speaker ${data.speaker}] ` : '';
+          setAudioTranscript(prev => ({
+            text: (prev?.text || '') + ' ' + speakerPrefix + data.transcript,
+            timestamp: new Date().toLocaleTimeString()
+          }));
+          setResults(prev => [...prev, {
+            text: `💬 ${speakerPrefix}${data.transcript}`,
+            timestamp: new Date().toLocaleTimeString(),
+            inferenceLatency: null,
+            totalLatency: null
+          }]);
+        }
+      });
+
+      socket.on('error', (error) => {
+        console.error('WebSocket error:', error);
+        setResults(prev => [...prev, {
+          text: `❌ Transcription error: ${error.message}`,
+          timestamp: new Date().toLocaleTimeString(),
+          inferenceLatency: null,
+          totalLatency: null
+        }]);
+      });
+
+      socket.on('closed', () => {
+        console.log('WebSocket closed');
+      });
+
+      setResults(prev => [...prev, {
+        text: '🎤 Initializing live transcription...',
+        timestamp: new Date().toLocaleTimeString(),
+        inferenceLatency: null,
+        totalLatency: null
+      }]);
+
+      // Send start event to backend FIRST - recording will start when 'ready' event is received
+      console.log('📤 Sending start event to backend');
+      socket.emit('start', {
+        language: 'en',
+        model: 'nova-3',
+        smart_format: true,
+        diarize: true,
+        interim_results: true,
+        encoding: 'opus',
+        sample_rate: 16000
+      });
+
+    } catch (error) {
+      console.error('Error starting audio recording:', error);
+      alert('Failed to access microphone. Please check permissions.');
+    }
+  };
+
+  const stopAudioRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      // Stop audio stream
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+      }
+
+      // Close WebSocket connection
+      if (socketRef.current) {
+        socketRef.current.emit('stop');
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      
+      setResults(prev => [...prev, {
+        text: '⏹️ Live transcription stopped',
+        timestamp: new Date().toLocaleTimeString(),
+        inferenceLatency: null,
+        totalLatency: null
+      }]);
     }
   };
 
@@ -149,6 +331,9 @@ function App() {
         videoRef.current.play();
       }
       streamRef.current = stream;
+
+      // Start audio recording alongside video
+      await startAudioRecording();
 
       // Initialize Overshoot SDK
       const vision = new RealtimeVision({
@@ -255,6 +440,9 @@ function App() {
 
   const handleStop = async () => {
     try {
+      // Stop audio recording first
+      stopAudioRecording();
+      
       // Stop Overshoot SDK
       if (visionRef.current) {
         await visionRef.current.stop();
@@ -287,19 +475,37 @@ function App() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Clean up video stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      // Clean up audio recording
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop();
+      }
+      // Clean up audio stream
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      // Clean up WebSocket
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
-  }, []);
+  }, [isRecording]);
 
   return (
     <div className="App">
       <header className="App-header">
-        <h1>Overshoot Vision Starter</h1>
+        {/* Header - Notion style */}
+        <h1>
+          <span style={{ marginRight: '0.5rem' }}>📸</span>
+          Overshoot Vision
+        </h1>
         
         {/* Camera Preview */}
-        <div className="camera-preview">
+        <div style={{ padding: '0 1rem' }}>
+          <div className="camera-preview">
           <video
             ref={videoRef}
             autoPlay
@@ -307,41 +513,71 @@ function App() {
             muted
             className="video-preview"
           />
-          {!isRunning && (
-            <div className="video-placeholder">
-              Camera preview will appear here
+            {!isRunning && (
+              <div className="video-placeholder">
+                Camera preview will appear here
+              </div>
+            )}
+          </div>
+
+            <div className="controls">
+            {!isRunning ? (
+              <button onClick={handleStart} className="btn btn-start">
+                <span>▶</span>
+                Start Camera & Audio
+              </button>
+            ) : (
+              <button onClick={handleStop} className="btn btn-stop">
+                <span>■</span>
+                Stop Camera & Audio
+              </button>
+            )}
+          </div>
+          
+            <div className="prompt-control">
+            <input
+              type="text"
+              placeholder="Update prompt (e.g., 'Count the number of people')"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter' && e.target.value) {
+                  handleUpdatePrompt(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+              disabled={!isRunning}
+            />
+          </div>
+
+          {/* Audio Recording Status */}
+          {isRecording && (
+            <div className="audio-recording-indicator" style={{ 
+              marginTop: '1rem', 
+              padding: '0.5rem', 
+              background: 'rgba(255,0,0,0.2)', 
+              borderRadius: '8px',
+              textAlign: 'center'
+            }}>
+              <span>🎤 Live transcription active...</span>
             </div>
           )}
-        </div>
 
-        <div className="controls">
-          {!isRunning ? (
-            <button onClick={handleStart} className="btn btn-start">
-              Start Camera
-            </button>
-          ) : (
-            <button onClick={handleStop} className="btn btn-stop">
-              Stop Camera
-            </button>
+          {audioTranscript && (
+            <div className="transcript-display" style={{ 
+              marginTop: '1rem', 
+              padding: '1rem', 
+              background: 'rgba(255,255,255,0.1)', 
+              borderRadius: '8px' 
+            }}>
+              <h4>Live Transcript:</h4>
+              <p style={{ whiteSpace: 'pre-wrap' }}>{audioTranscript.text}</p>
+              <small style={{ opacity: 0.7 }}>Updated: {audioTranscript.timestamp}</small>
+            </div>
           )}
-        </div>
-        <div className="prompt-control">
-          <input
-            type="text"
-            placeholder="Update prompt (e.g., 'Count the number of people')"
-            onKeyPress={(e) => {
-              if (e.key === 'Enter' && e.target.value) {
-                handleUpdatePrompt(e.target.value);
-                e.target.value = '';
-              }
-            }}
-            disabled={!isRunning}
-          />
         </div>
         {/* Generated Headshot Display */}
         {(generatedImage || isGenerating) && (
           <div className="generated-headshot">
-            <h2>Generated Headshot:</h2>
+            <h2>Generated Headshot</h2>
             {isGenerating ? (
               <div className="generating-state">
                 <div className="spinner"></div>
@@ -373,13 +609,15 @@ function App() {
 
         {/* Screenshot Buffer Indicator */}
         {screenshotBuffer.length > 0 && screenshotBuffer.length < 2 && (
-          <div className="buffer-indicator">
-            <p>Screenshots collected: {screenshotBuffer.length}/2</p>
+          <div style={{ padding: '0 1rem' }}>
+            <div className="buffer-indicator">
+              <p>Screenshots collected: {screenshotBuffer.length}/2</p>
+            </div>
           </div>
         )}
 
         <div className="results">
-          <h2>Results:</h2>
+          <h2>Results</h2>
           {results.length === 0 ? (
             <p className="no-results">No results yet. Start the camera to begin.</p>
           ) : (
