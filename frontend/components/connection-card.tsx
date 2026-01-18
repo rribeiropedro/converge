@@ -77,14 +77,28 @@ function ConnectionCard({ connection, onClick }: ConnectionCardProps) {
             )}
           </div>
 
-          {/* Company + Role */}
-          <div className="flex items-center gap-1 mt-1 text-muted-foreground text-xs">
-            <Building2 className="size-3 shrink-0" />
-            <span className="truncate">
-              {connection.company}
-              {connection.role && ` • ${connection.role}`}
-            </span>
-          </div>
+          {/* Company + Role (professional) or Institution + Major (student) */}
+          {connection.isStudent ? (
+            (connection.institution || connection.major) && (
+              <div className="flex items-center gap-1 mt-1 text-muted-foreground text-xs">
+                <Building2 className="size-3 shrink-0" />
+                <span className="truncate">
+                  {connection.institution || connection.major}
+                  {connection.institution && connection.major && ` • ${connection.major}`}
+                </span>
+              </div>
+            )
+          ) : (
+            connection.company && (
+              <div className="flex items-center gap-1 mt-1 text-muted-foreground text-xs">
+                <Building2 className="size-3 shrink-0" />
+                <span className="truncate">
+                  {connection.company}
+                  {connection.role && ` • ${connection.role}`}
+                </span>
+              </div>
+            )
+          )}
         </div>
       </div>
 
