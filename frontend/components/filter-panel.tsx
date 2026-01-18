@@ -12,6 +12,7 @@ export interface FilterState {
   dateMode: "weeks" | "months"
   dateRange: number
   location: string | null
+  groupBy: "none" | "date" | "role"
 }
 
 interface FilterPanelProps {
@@ -23,7 +24,7 @@ interface FilterPanelProps {
 export function FilterPanel({ filters, onFiltersChange, onClear }: FilterPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
 
-  const hasActiveFilters = filters.location || filters.dateRange > 0
+  const hasActiveFilters = filters.location || filters.dateRange > 0 || filters.groupBy !== "none"
 
   const weekOptions = [
     { value: 1, label: "Last 1 week" },
@@ -130,9 +131,9 @@ export function FilterPanel({ filters, onFiltersChange, onClear }: FilterPanelPr
               <Label className="text-xs text-muted-foreground">Location</Label>
               <Select
                 value={filters.location || "all"}
-                onValueChange={(value) => onFiltersChange({ 
-                  ...filters, 
-                  location: value === "all" ? null : value 
+                onValueChange={(value) => onFiltersChange({
+                  ...filters,
+                  location: value === "all" ? null : value
                 })}
               >
                 <SelectTrigger className="w-full h-8 text-xs">
@@ -145,6 +146,27 @@ export function FilterPanel({ filters, onFiltersChange, onClear }: FilterPanelPr
                       {loc}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Group By Filter */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <Label className="text-xs text-muted-foreground">Group by</Label>
+              <Select
+                value={filters.groupBy}
+                onValueChange={(value) => onFiltersChange({
+                  ...filters,
+                  groupBy: value as "none" | "date" | "role"
+                })}
+              >
+                <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectValue placeholder="Select grouping" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="date">Date met</SelectItem>
+                  <SelectItem value="role">Role</SelectItem>
                 </SelectContent>
               </Select>
             </div>

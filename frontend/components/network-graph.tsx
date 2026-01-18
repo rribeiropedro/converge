@@ -2,18 +2,23 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import * as d3 from "d3"
+import Image from "next/image"
 import { type Connection, type Edge, connections as allConnections, edges as allEdges } from "@/lib/data"
+import { GraphLegend } from "./graph-legend"
+import { Calendar, MapPin } from "lucide-react"
 
 interface NetworkGraphProps {
   connections: Connection[]
   edges: Edge[]
   onNodeClick: (connection: Connection) => void
   filterMode?: "date" | "location" | null
+  groupBy?: "none" | "date" | "role"
 }
 
 interface SimulationNode extends d3.SimulationNodeDatum {
   id: string
   connection: Connection
+  group?: string
   x?: number
   y?: number
 }
@@ -24,7 +29,91 @@ interface SimulationLink extends d3.SimulationLinkDatum<SimulationNode> {
   strength: number
 }
 
-export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: NetworkGraphProps) {
+// Helper function to get group for a connection based on groupBy mode
+function getGroup(connection: Connection, groupBy: string): string {
+  if (groupBy === "date") {
+    const now = new Date()
+    const metDate = new Date(connection.metDate)
+    const daysDiff = Math.floor((now.getTime() - metDate.getTime()) / (1000 * 60 * 60 * 24))
+
+    if (daysDiff <= 7) return "This Week"
+    if (daysDiff <= 30) return "This Month"
+    if (daysDiff <= 90) return "Last 3 Months"
+    return "Earlier"
+  }
+
+  if (groupBy === "role") {
+    // Extract role from tags
+    const roleTags = ["engineer", "designer", "product", "founder", "investor"]
+    const role = connection.tags.find(tag => roleTags.includes(tag.toLowerCase()))
+
+    if (role) {
+      const normalized = role.toLowerCase()
+      if (normalized === "engineer") return "Engineer"
+      if (normalized === "designer") return "Designer"
+      if (normalized === "product") return "Product"
+      if (normalized === "founder") return "Founder"
+      if (normalized === "investor") return "Sales"
+    }
+    return "Other"
+  }
+
+  return "none"
+}
+
+// Helper function to get color for a group
+function getGroupColor(group: string, groupBy: string): string {
+  if (groupBy === "date") {
+    const dateColors: Record<string, string> = {
+      "This Week": "#3B82F6",
+      "This Month": "#22C55E",
+      "Last 3 Months": "#EAB308",
+      "Earlier": "#6B7280"
+    }
+    return dateColors[group] || "#6B7280"
+  }
+
+  if (groupBy === "role") {
+    const roleColors: Record<string, string> = {
+      "Engineer": "#3B82F6",
+      "Designer": "#A855F7",
+      "Product": "#22C55E",
+      "Sales": "#F97316",
+      "Founder": "#EF4444",
+      "Other": "#6B7280"
+    }
+    return roleColors[group] || "#6B7280"
+  }
+
+  return "#6B7280"
+}
+
+// Helper function to get cluster center position for a group
+function getClusterCenter(
+  group: string,
+  allGroups: string[],
+  width: number,
+  height: number
+): { x: number; y: number } {
+  const index = allGroups.indexOf(group)
+  const total = allGroups.length
+
+  // Arrange clusters in a circle pattern
+  if (total === 1) {
+    return { x: width / 2, y: height / 2 }
+  }
+
+  // Calculate radius based on canvas size and number of groups
+  const radius = Math.min(width, height) * 0.3
+  const angle = (2 * Math.PI * index) / total - Math.PI / 2 // Start from top
+
+  return {
+    x: width / 2 + Math.cos(angle) * radius,
+    y: height / 2 + Math.sin(angle) * radius
+  }
+}
+
+export function NetworkGraph({ connections, edges, onNodeClick, filterMode, groupBy = "none" }: NetworkGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; connection: Connection } | null>(null)
@@ -97,6 +186,7 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
     const nodes: SimulationNode[] = connections.map(c => ({
       id: c.id,
       connection: c,
+      group: groupBy !== "none" ? getGroup(c, groupBy) : undefined,
     }))
 
     // Create links from edges (only if both nodes exist in filtered set)
@@ -121,18 +211,68 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
 
     svg.call(zoom)
 
-    // Create force simulation
+    // Get unique groups for island clustering
+    const groups = groupBy !== "none" ? [...new Set(nodes.map(n => n.group).filter(Boolean))] as string[] : []
+
+    // Create force simulation with island clustering when groupBy is active
     const simulation = d3.forceSimulation<SimulationNode>(nodes)
       .force("link", d3.forceLink<SimulationNode, SimulationLink>(links)
         .id(d => d.id)
-        .distance(120)
-        .strength(d => d.strength * 0.5))
-      .force("charge", d3.forceManyBody().strength(-300))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(50))
+        .distance(groupBy !== "none" ? 80 : 120)
+        .strength(d => groupBy !== "none" ? d.strength * 0.3 : d.strength * 0.5))
+      .force("charge", d3.forceManyBody().strength(groupBy !== "none" ? -200 : -300))
+      .force("collision", d3.forceCollide().radius((d: SimulationNode) => {
+        // Larger collision radius for bigger nodes and inter-group spacing
+        return groupBy !== "none" ? 55 : 60
+      }))
 
-    // Add clustering force based on filter mode
-    if (filterMode === "location") {
+    // Apply island clustering forces when groupBy is active
+    if (groupBy !== "none" && groups.length > 0) {
+      // Strong pull to cluster centers
+      simulation
+        .force("clusterX", d3.forceX<SimulationNode>(d => {
+          if (d.group) {
+            const center = getClusterCenter(d.group, groups, width, height)
+            return center.x
+          }
+          return width / 2
+        }).strength(0.6))
+        .force("clusterY", d3.forceY<SimulationNode>(d => {
+          if (d.group) {
+            const center = getClusterCenter(d.group, groups, width, height)
+            return center.y
+          }
+          return height / 2
+        }).strength(0.6))
+
+      // Custom force to repel nodes from other cluster centers
+      simulation.force("interClusterRepulsion", () => {
+        nodes.forEach(node => {
+          if (!node.group || !node.x || !node.y) return
+
+          groups.forEach(group => {
+            if (group !== node.group) {
+              const center = getClusterCenter(group, groups, width, height)
+              const dx = node.x! - center.x
+              const dy = node.y! - center.y
+              const distance = Math.sqrt(dx * dx + dy * dy)
+
+              if (distance < 200) {
+                const repulsionStrength = 2 * (200 - distance) / distance
+                node.vx = (node.vx || 0) + dx * repulsionStrength
+                node.vy = (node.vy || 0) + dy * repulsionStrength
+              }
+            }
+          })
+        })
+      })
+    } else {
+      // Center force when no grouping
+      simulation.force("center", d3.forceCenter(width / 2, height / 2))
+    }
+
+    // Add clustering force based on filter mode (legacy support)
+    if (filterMode === "location" && groupBy === "none") {
       const locationCenters: Record<string, { x: number; y: number }> = {}
       const uniqueLocations = [...new Set(connections.map(c => c.location))]
       uniqueLocations.forEach((loc, i) => {
@@ -142,14 +282,14 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
           y: height / 2 + Math.sin(angle) * 150,
         }
       })
-      
-      simulation.force("cluster", d3.forceX<SimulationNode>(d => 
+
+      simulation.force("cluster", d3.forceX<SimulationNode>(d =>
         locationCenters[d.connection.location]?.x || width / 2
       ).strength(0.3))
-      simulation.force("clusterY", d3.forceY<SimulationNode>(d => 
+      simulation.force("clusterY", d3.forceY<SimulationNode>(d =>
         locationCenters[d.connection.location]?.y || height / 2
       ).strength(0.3))
-    } else if (filterMode === "date") {
+    } else if (filterMode === "date" && groupBy === "none") {
       // Cluster by month
       simulation.force("cluster", d3.forceX<SimulationNode>(d => {
         const month = new Date(d.connection.metDate).getMonth()
@@ -191,12 +331,27 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
           d.fy = null
         }))
 
+    // Node size constants - increased for better face visibility
+    const NODE_RADIUS = 40  // Main avatar radius (was 28)
+    const GROUP_RING_RADIUS = 48  // Color ring for grouping (was 34)
+    const HOVER_RING_RADIUS = 45  // Hover effect ring (was 32)
+
+    // Add group color ring when groupBy is active
+    if (groupBy !== "none") {
+      node.append("circle")
+        .attr("r", GROUP_RING_RADIUS)
+        .attr("fill", "none")
+        .attr("stroke", d => d.group ? getGroupColor(d.group, groupBy) : "#6B7280")
+        .attr("stroke-width", 5)
+        .attr("class", "group-ring")
+    }
+
     // Add outer ring (hover effect)
     node.append("circle")
-      .attr("r", 32)
+      .attr("r", HOVER_RING_RADIUS)
       .attr("fill", "transparent")
       .attr("stroke", "rgba(99, 102, 241, 0)")
-      .attr("stroke-width", 3)
+      .attr("stroke-width", 4)
       .attr("class", "node-ring")
 
     // Add clip path for images
@@ -205,24 +360,24 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
       defs.append("clipPath")
         .attr("id", `clip-${n.id}`)
         .append("circle")
-        .attr("r", 28)
+        .attr("r", NODE_RADIUS)
     })
 
     // Add avatar images
     node.append("image")
       .attr("xlink:href", d => d.connection.avatarUrl)
-      .attr("x", -28)
-      .attr("y", -28)
-      .attr("width", 56)
-      .attr("height", 56)
+      .attr("x", -NODE_RADIUS)
+      .attr("y", -NODE_RADIUS)
+      .attr("width", NODE_RADIUS * 2)
+      .attr("height", NODE_RADIUS * 2)
       .attr("clip-path", d => `url(#clip-${d.id})`)
       .attr("preserveAspectRatio", "xMidYMid slice")
 
     // Add border circle
     node.append("circle")
-      .attr("r", 28)
+      .attr("r", NODE_RADIUS)
       .attr("fill", "none")
-      .attr("stroke", "rgba(255, 255, 255, 0.1)")
+      .attr("stroke", "rgba(255, 255, 255, 0.15)")
       .attr("stroke-width", 2)
 
     // Event handlers
@@ -270,7 +425,7 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
     return () => {
       simulation.stop()
     }
-  }, [connections, edges, dimensions, onNodeClick, filterMode, getEdgeColor])
+  }, [connections, edges, dimensions, onNodeClick, filterMode, groupBy, getEdgeColor])
 
   return (
     <div ref={containerRef} className="relative w-full h-full">
@@ -281,21 +436,84 @@ export function NetworkGraph({ connections, edges, onNodeClick, filterMode }: Ne
         className="w-full h-full"
       />
       
-      {/* Tooltip */}
+      {/* Enhanced Tooltip */}
       {tooltip && (
         <div
-          className="absolute pointer-events-none z-50 rounded-lg border border-border bg-popover p-3 shadow-lg"
+          className="absolute pointer-events-none z-50 w-64 rounded-lg border border-border bg-card/95 backdrop-blur-sm shadow-xl overflow-hidden"
           style={{
             left: tooltip.x,
             top: tooltip.y,
             transform: "translateX(-50%)",
           }}
         >
-          <p className="font-medium text-foreground text-sm">{tooltip.connection.name}</p>
-          <p className="text-xs text-muted-foreground">{tooltip.connection.location}</p>
-          <p className="text-xs text-primary">{tooltip.connection.industry}</p>
+          <div className="p-3 space-y-2">
+            {/* Header with Avatar */}
+            <div className="flex items-start gap-2.5">
+              <div className="relative h-10 w-10 rounded overflow-hidden border border-border flex-shrink-0">
+                <Image
+                  src={tooltip.connection.avatarUrl}
+                  alt={tooltip.connection.name}
+                  width={40}
+                  height={40}
+                  className="object-cover"
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm text-foreground truncate">
+                  {tooltip.connection.name}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {tooltip.connection.role || tooltip.connection.industry}
+                  {tooltip.connection.company && ` @ ${tooltip.connection.company}`}
+                </p>
+              </div>
+            </div>
+
+            {/* Location & Date */}
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3 flex-shrink-0" />
+                <span>{tooltip.connection.location}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Calendar className="h-3 w-3 flex-shrink-0" />
+                <span>
+                  Met at {tooltip.connection.event || "networking event"} on{" "}
+                  {new Date(tooltip.connection.metDate).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric"
+                  })}
+                </span>
+              </div>
+            </div>
+
+            {/* Tags */}
+            {tooltip.connection.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {tooltip.connection.tags.slice(0, 3).map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Footer hint */}
+          <div className="px-3 py-1.5 bg-accent/30 border-t border-border">
+            <p className="text-[10px] text-muted-foreground text-center">
+              Click to view full profile
+            </p>
+          </div>
         </div>
       )}
+
+      {/* Graph Legend */}
+      <GraphLegend groupBy={groupBy} />
 
       {/* Empty state */}
       {connections.length === 0 && (
