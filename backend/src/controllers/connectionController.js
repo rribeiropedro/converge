@@ -7,7 +7,6 @@ import {
   addInteractionToExistingConnection,
 } from '../services/processingService.js';
 import Connection from '../models/Connection.js';
-import { generateFaceEmbedding } from '../services/faceEmbeddingService.js';
 import { findMatchingConnection, determineMatchAction } from '../services/faceMatching.js';
 import User from '../models/User.js';
 
@@ -187,14 +186,14 @@ export async function remove(req, res) {
   }
 }
 
-export async function testFaceRecognition(req, res) {
+export async function testAppearanceMatching(req, res) {
   try {
-    const { imageData, userId } = req.body;
+    const { name, appearanceDescription, userId } = req.body;
 
-    if (!imageData) {
-      return res.status(400).json({ 
-        error: 'imageData is required (base64 data URI or URL)',
-        example: 'data:image/jpeg;base64,/9j/4AAQ...'
+    if (!name && !appearanceDescription) {
+      return res.status(400).json({
+        error: 'name or appearanceDescription is required',
+        example: { name: 'John Smith', appearanceDescription: 'Wearing dark blue suit, glasses, short brown hair' }
       });
     }
 
@@ -207,53 +206,41 @@ export async function testFaceRecognition(req, res) {
       }
     } else {
       // Create or get test user
-      testUser = await User.findOne({ email: 'test-face@nexhacks.com' });
+      testUser = await User.findOne({ email: 'test-appearance@nexhacks.com' });
       if (!testUser) {
         testUser = await User.create({
-          name: 'Face Test User',
-          email: 'test-face@nexhacks.com'
+          name: 'Appearance Test User',
+          email: 'test-appearance@nexhacks.com'
         });
       }
     }
 
-    // Generate embedding
-    console.log('Generating face embedding...');
-    const embedding = await generateFaceEmbedding(imageData);
-    
-    if (!embedding || embedding.length !== 128) {
-      return res.status(500).json({ 
-        error: 'Invalid embedding generated',
-        embedding_length: embedding?.length 
-      });
-    }
-
-    // Find matches
-    console.log('Finding matching connections...');
-    const matches = await findMatchingConnection(testUser._id, embedding);
+    // Find matches using text embedding
+    console.log('Finding matching connections via appearance...');
+    const matches = await findMatchingConnection(testUser._id, name || '', appearanceDescription || '');
 
     // Determine action
     const action = determineMatchAction(matches, {
-      name: { value: 'Test Person', confidence: 'high', source: 'manual' }
+      name: { value: name || 'Test Person', confidence: 'high', source: 'manual' }
     });
 
     res.json({
       success: true,
-      embedding_length: embedding.length,
-      embedding_preview: embedding.slice(0, 5),
+      search_text: `${name || 'Unknown'} - ${appearanceDescription || ''}`.trim(),
       matches: matches.map(m => ({
         connection_id: m.connection._id,
-        name: m.connection.name.value,
-        company: m.connection.company?.value,
+        name: m.connection.name?.value || m.connection.name,
+        company: m.connection.company?.value || m.connection.company,
         score: m.score,
-        confidence: m.score >= 0.85 ? 'high' : m.score >= 0.70 ? 'medium' : 'low'
+        confidence: m.score >= 0.85 ? 'high' : m.score >= 0.75 ? 'medium' : 'low'
       })),
       match_action: action.action,
       match_score: action.match_score,
       message: `Found ${matches.length} potential match${matches.length !== 1 ? 'es' : ''}`
     });
   } catch (error) {
-    console.error('Face recognition test error:', error);
-    res.status(500).json({ 
+    console.error('Appearance matching test error:', error);
+    res.status(500).json({
       error: error.message,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });

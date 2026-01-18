@@ -2,8 +2,7 @@
  * Controller for Overshoot SDK related endpoints
  */
 
-import { generateFaceEmbedding } from '../services/faceEmbeddingService.js';
-import { findMatchingConnection } from '../services/faceMatching.js';
+import { findMatchingConnection, addAppearanceEmbedding } from '../services/faceMatching.js';
 import SessionManager from '../realtime/SessionManager.js';
 import { getSocketBySessionId } from '../realtime/sessionSocket.js';
 import * as logger from '../utils/sessionLogger.js';
@@ -73,10 +72,13 @@ export const generateHeadshot = async (req, res) => {
       screenshotCount: screenshots.length
     });
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    // Mark headshot as pending so session waits for it before finalizing
+    SessionManager.markHeadshotPending(sessionId);
+
+    const apiKey = process.env.OPEN_ROUTER_API_KEY;
     if (!apiKey) {
-      console.error('OPENROUTER_API_KEY is not set in environment variables');
-      return res.status(500).json({ error: 'OPENROUTER_API_KEY not configured' });
+      console.error('OPEN_ROUTER_API_KEY is not set in environment variables');
+      return res.status(500).json({ error: 'OPEN_ROUTER_API_KEY not configured' });
     }
     
     // Debug: Log that we have an API key (but don't log the actual key)
@@ -115,8 +117,10 @@ export const generateHeadshot = async (req, res) => {
     );
 
     // Prepare the request payload for OpenRouter (OpenAI-compatible format)
+    // IMPORTANT: modalities: ["image", "text"] is required to enable image generation output
+    // Without this, Gemini models only return text descriptions
     const requestBody = {
-      model: 'google/gemini-2.5-flash-image',
+      model: 'bytedance-seed/seedream-4.5',
       messages: [
         {
           role: 'user',
@@ -293,8 +297,22 @@ export const generateHeadshot = async (req, res) => {
       logger.logHeadshotGeneration(sessionId, 'success', {
         imageUrl: extractedImageUrl
       });
-      
+
       // Store headshot in session visual data
+      // IMPORTANT: Check if session still exists before updating
+      const activeSessionIds = SessionManager.getActiveSessionIds();
+      if (!activeSessionIds.includes(sessionId)) {
+        console.log(`[Headshot] Session ${sessionId} already finalized, cannot store headshot`);
+        // Session is gone, but we can still return the image to the client
+        // The client will display it, even if it's not saved to MongoDB
+        return res.json({
+          success: true,
+          image: extractedImageUrl,
+          text: textContent,
+          warning: 'Session already finalized - headshot not saved to database'
+        });
+      }
+
       try {
         SessionManager.updateVisual(sessionId, {
           headshot: {
@@ -302,8 +320,14 @@ export const generateHeadshot = async (req, res) => {
             base64: extractedImageUrl.startsWith('data:image') ? extractedImageUrl : null
           }
         });
+        // Mark headshot as complete ONLY if update succeeded
+        SessionManager.markHeadshotComplete(sessionId);
+        console.log(`✅ Headshot stored in session ${sessionId}`);
       } catch (err) {
         logger.logError(sessionId, 'Storing headshot in session', err);
+        // DO NOT mark complete if update failed - let the timeout handle it
+        // This is critical: marking complete when update failed causes data loss
+        console.log(`[Headshot] Session ${sessionId} update failed, NOT marking complete`);
       }
       
       // Perform face matching in the background (don't block the response)
@@ -354,51 +378,40 @@ export const generateHeadshot = async (req, res) => {
 };
 
 /**
- * Perform face matching using the generated headshot
- * @param {string} imageUrl - Base64 data URL of the generated headshot
+ * Perform connection matching using appearance text embedding
+ * @param {string} imageUrl - Base64 data URL of the generated headshot (for storage only)
  * @param {string} sessionId - Session ID to update with match results
  */
 async function performFaceMatching(imageUrl, sessionId) {
   try {
-    // Get session to retrieve userId
+    // Check if session still exists before attempting any operations
+    const activeSessionIds = SessionManager.getActiveSessionIds();
+    if (!activeSessionIds.includes(sessionId)) {
+      console.log(`[Matching] Session ${sessionId} already finalized, skipping face matching`);
+      return;
+    }
+
+    // Get session to retrieve userId and visual/audio data
     let session;
     try {
       session = SessionManager.getSession(sessionId);
     } catch (err) {
-      console.error(`[FaceMatching] Session ${sessionId} not found:`, err.message);
+      console.error(`[Matching] Session ${sessionId} not found:`, err.message);
       return;
     }
-    
+
     const userId = session.userId;
-    
-    logger.logFaceEmbeddingGeneration(sessionId, 'started');
-    
-    // Generate face embedding from the generated headshot
-    let faceEmbedding;
-    try {
-      faceEmbedding = await generateFaceEmbedding(imageUrl);
-      
-      logger.logFaceEmbeddingGeneration(sessionId, 'success', {
-        dimensions: faceEmbedding.length
-      });
-      
-      // Store face embedding in session visual data
-      SessionManager.updateVisual(sessionId, {
-        face_embedding: faceEmbedding
-      });
-    } catch (err) {
-      // Couldn't generate embedding - treat as new contact (not an error)
-      logger.logFaceEmbeddingGeneration(sessionId, 'error', {
-        error: err.message
-      });
-      
-      SessionManager.updateFaceMatch(sessionId, {
-        matched: false,
-        connectionId: null,
-        name: null,
-        connectionData: null
-      });
-      
+    const visualData = session.visual;
+    const audioData = session.audio;
+
+    // Get appearance description from Overshoot (already working)
+    const appearanceDescription = visualData?.appearance?.description || '';
+    // Get name from transcript parsing
+    const name = audioData?.name || '';
+
+    if (!appearanceDescription && !name) {
+      console.log('⚠️ No appearance or name data available for matching');
+
       // Emit new contact result to client
       const socket = getSocketBySessionId(sessionId);
       if (socket) {
@@ -410,21 +423,21 @@ async function performFaceMatching(imageUrl, sessionId) {
           insights: [
             { type: 'bullet', text: 'New person detected' },
             { type: 'bullet', text: 'No previous connection found' },
-            { type: 'bullet', text: 'Professional networking context' },
             { type: 'bullet', text: 'Ready to save new connection' }
           ]
         });
       }
       return;
     }
-    
-    // Find matching connection in MongoDB
-    logger.logFaceMatchingStarted(sessionId, true, faceEmbedding.length);
-    const matches = await findMatchingConnection(userId, faceEmbedding);
-    
+
+    logger.logFaceMatchingStarted(sessionId, true, 1536); // 1536-dim text embedding
+
+    // Find matching connection using TEXT embedding
+    const matches = await findMatchingConnection(userId, name, appearanceDescription);
+
     logger.logFaceMatchResult(
       sessionId,
-      matches.length > 0 && matches[0].score >= 0.80,
+      matches.length > 0 && matches[0].score >= 0.75,
       matches.length > 0 ? {
         name: matches[0].connection.name?.value || matches[0].connection.name || 'Unknown',
         connectionId: matches[0].connection._id.toString(),
@@ -432,14 +445,20 @@ async function performFaceMatching(imageUrl, sessionId) {
       } : null,
       matches
     );
-    
-    // Prepare face match result data for the UI overlay
-    let faceMatchResult;
-    
-    if (matches.length > 0 && matches[0].score >= 0.80) {
+
+    // Prepare match result data for the UI overlay
+    let matchResult;
+
+    if (matches.length > 0 && matches[0].score >= 0.75) {
       // Best match found
       const bestMatch = matches[0];
-      
+
+      // Check if session still exists before updating
+      if (!SessionManager.getActiveSessionIds().includes(sessionId)) {
+        console.log(`[Matching] Session ${sessionId} finalized during matching, skipping update`);
+        return;
+      }
+
       // Update session with match results
       SessionManager.updateFaceMatch(sessionId, {
         matched: true,
@@ -451,11 +470,11 @@ async function performFaceMatching(imageUrl, sessionId) {
           score: bestMatch.score
         }
       });
-      
+
       // Build result for UI with real data
       const connectionName = bestMatch.connection.name?.value || bestMatch.connection.name || 'Unknown';
       const connectionCompany = bestMatch.connection.company?.value || bestMatch.connection.company || 'Unknown';
-      faceMatchResult = {
+      matchResult = {
         matched: true,
         name: connectionName,
         company: connectionCompany,
@@ -467,17 +486,35 @@ async function performFaceMatching(imageUrl, sessionId) {
           { type: 'bullet', text: `Previous connection found` }
         ]
       };
+
+      // Update the existing connection's appearance embedding
+      try {
+        await addAppearanceEmbedding(
+          bestMatch.connection._id.toString(),
+          name,
+          appearanceDescription,
+          { event: session.context?.event }
+        );
+      } catch (err) {
+        console.warn('Failed to update appearance embedding:', err.message);
+      }
+
     } else {
-      // No match found - new person (already logged above)
+      // No match found - new person
+      // Check if session still exists before updating
+      if (!SessionManager.getActiveSessionIds().includes(sessionId)) {
+        console.log(`[Matching] Session ${sessionId} finalized during matching, skipping update`);
+        return;
+      }
+
       SessionManager.updateFaceMatch(sessionId, {
         matched: false,
         connectionId: null,
         name: null,
         connectionData: null
       });
-      
-      // Build mock result for UI (new person)
-      faceMatchResult = {
+
+      matchResult = {
         matched: false,
         name: 'New Contact',
         company: null,
@@ -490,17 +527,17 @@ async function performFaceMatching(imageUrl, sessionId) {
         ]
       };
     }
-    
+
     // Emit update to client via WebSocket
     const socket = getSocketBySessionId(sessionId);
     if (socket) {
-      socket.emit('face_match_result', faceMatchResult);
+      socket.emit('face_match_result', matchResult);
     } else {
-      logger.logError(sessionId, 'Face matching - socket not found', new Error('No socket found for session'));
+      logger.logError(sessionId, 'Matching - socket not found', new Error('No socket found for session'));
     }
-    
+
   } catch (error) {
-    logger.logError(sessionId, 'Face matching', error);
+    logger.logError(sessionId, 'Connection matching', error);
   }
 }
 
