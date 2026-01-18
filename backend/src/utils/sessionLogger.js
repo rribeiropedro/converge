@@ -62,16 +62,25 @@ export function logSessionCreated(sessionId, userId, context) {
 export function logVisualDataReceived(sessionId, visualData) {
   console.log(`\n${COLORS.magenta}📸 VISUAL DATA RECEIVED${COLORS.reset} [${formatSessionId(sessionId)}]`);
   console.log(`  ${COLORS.dim}${formatTimestamp()}${COLORS.reset}`);
-  
+
+  // Check for appearance embedding (new 1536-dim text embedding)
+  const hasAppearanceEmbedding = visualData.appearance_embedding && visualData.appearance_embedding.length > 0;
+  const appearanceEmbeddingLength = hasAppearanceEmbedding ? visualData.appearance_embedding.length : 0;
+  // Legacy: face embedding (128-dim)
   const hasFaceEmbedding = visualData.face_embedding && visualData.face_embedding.length > 0;
-  const embeddingLength = hasFaceEmbedding ? visualData.face_embedding.length : 0;
+  const faceEmbeddingLength = hasFaceEmbedding ? visualData.face_embedding.length : 0;
   const hasAppearance = visualData.appearance?.description;
   const hasEnvironment = visualData.environment?.description;
   const hasHeadshot = visualData.headshot?.url || visualData.headshot?.base64;
-  
-  console.log(`  ${hasFaceEmbedding ? COLORS.green + '✓' : COLORS.yellow + '○'} Face Embedding: ${hasFaceEmbedding ? `${embeddingLength}-dim vector` : 'Not available'}`);
+
+  // Log appearance embedding (primary)
+  console.log(`  ${hasAppearanceEmbedding ? COLORS.green + '✓' : COLORS.yellow + '○'} Appearance Embedding: ${hasAppearanceEmbedding ? `${appearanceEmbeddingLength}-dim text vector` : 'Not available'}`);
+  if (hasAppearanceEmbedding) {
+    console.log(`    ${COLORS.dim}First 5 values: [${visualData.appearance_embedding.slice(0, 5).map(v => v.toFixed(4)).join(', ')}...]${COLORS.reset}`);
+  }
+  // Legacy: face embedding
   if (hasFaceEmbedding) {
-    console.log(`    ${COLORS.dim}First 5 values: [${visualData.face_embedding.slice(0, 5).map(v => v.toFixed(4)).join(', ')}...]${COLORS.reset}`);
+    console.log(`  ${COLORS.dim}○ Face Embedding (legacy): ${faceEmbeddingLength}-dim vector${COLORS.reset}`);
   }
   
   console.log(`  ${hasAppearance ? COLORS.green + '✓' : COLORS.yellow + '○'} Appearance: ${hasAppearance ? 'Parsed' : 'Not available'}`);
