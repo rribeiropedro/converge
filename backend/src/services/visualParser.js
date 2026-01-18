@@ -1,9 +1,29 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { generateFaceEmbedding } from './faceEmbeddingService.js';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+async function callOpenRouter(prompt) {
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPEN_ROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'anthropic/claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
 
 const VISUAL_EXTRACTION_PROMPT = `You are an AI assistant that extracts structured visual profile data from video/image analysis.
 
@@ -39,18 +59,7 @@ export async function parseVisualData(visualInput) {
       ? visualInput 
       : JSON.stringify(visualInput);
 
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [
-        {
-          role: 'user',
-          content: `${VISUAL_EXTRACTION_PROMPT}\n\nVISUAL DATA:\n${inputDescription}`,
-        },
-      ],
-    });
-
-    const responseText = message.content[0].text;
+    const responseText = await callOpenRouter(`${VISUAL_EXTRACTION_PROMPT}\n\nVISUAL DATA:\n${inputDescription}`);
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error('Failed to extract JSON from LLM response');

@@ -1,8 +1,27 @@
-import Anthropic from '@anthropic-ai/sdk';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+async function callOpenRouter(prompt) {
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPEN_ROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'anthropic/claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
 
 const EXTRACTION_PROMPT = `You are an AI assistant that extracts structured profile data from conversation transcripts.
 
@@ -43,18 +62,7 @@ export async function parseTranscript(transcript) {
     throw new Error('Transcript is empty or invalid');
   }
 
-  const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1024,
-    messages: [
-      {
-        role: 'user',
-        content: `${EXTRACTION_PROMPT}\n\nTRANSCRIPT:\n${transcript}`,
-      },
-    ],
-  });
-
-  const responseText = message.content[0].text;
+  const responseText = await callOpenRouter(`${EXTRACTION_PROMPT}\n\nTRANSCRIPT:\n${transcript}`);
 
   const jsonMatch = responseText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
