@@ -1,6 +1,6 @@
 # Converge — Augmented Memory for Professional Networking ✨🤝
 
-![Startup Logo](converge_logo_name.png)
+<img src="converge_logo_name.png" alt="Startup Logo" width="320" />
 
 ---
 
